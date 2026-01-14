@@ -10,6 +10,7 @@
 package org.eclipse.scout.rt.platform.security;
 
 import java.security.Principal;
+import java.util.Objects;
 
 import org.ietf.jgss.GSSCredential;
 
@@ -33,5 +34,18 @@ public class SimplePrincipalWithDelegation implements Principal {
 
   public GSSCredential getDelegatedCred() {
     return m_delegatedCred;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (!(o instanceof SimplePrincipalWithDelegation that)) {
+      return false;
+    }
+    return Objects.equals(m_name, that.m_name) && Objects.equals(m_delegatedCred, that.m_delegatedCred);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(m_name, m_delegatedCred);
   }
 }
