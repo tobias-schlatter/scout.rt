@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023 BSI Business Systems Integration AG
+ * Copyright (c) 2010, 2026 BSI Business Systems Integration AG
  *
  * This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License 2.0
@@ -9,7 +9,10 @@
  */
 package org.eclipse.scout.rt.client.ui.basic.table;
 
+import org.eclipse.scout.rt.client.ui.BasicPropertySupportFactory;
+import org.eclipse.scout.rt.platform.BEANS;
 import org.eclipse.scout.rt.platform.reflect.AbstractPropertyObserver;
+import org.eclipse.scout.rt.platform.reflect.BasicPropertySupport;
 import org.eclipse.scout.rt.shared.data.basic.FontSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +23,11 @@ public class HeaderCell extends AbstractPropertyObserver implements IHeaderCell 
   public HeaderCell() {
     doSetColumnIndex(-1);
     setHorizontalAlignment(-1);
+  }
+
+  @Override
+  protected BasicPropertySupport createPropertySupport() {
+    return BEANS.get(BasicPropertySupportFactory.class).createFor(this);
   }
 
   @Override
