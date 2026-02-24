@@ -3332,6 +3332,10 @@ export class Table extends Widget implements TableModel, Filterable<TableRow> {
       this.updateBuffer.one('complete', () => this._restoreScrollTop(scrollTop));
       return;
     }
+    if (this.scrollToSelection && this.selectedRows.length > 0) {
+      // No restore, scrollTop has been modified by the selected row
+      return;
+    }
     // Cannot use setScrollTop because this.scrollTop may still have the old value so that _renderScrollTop would not been called
     // This is because _onScroll is called asynchronously
     this._setScrollTop(scrollTop);
