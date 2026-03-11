@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2023 BSI Business Systems Integration AG
+ * Copyright (c) 2010, 2026 BSI Business Systems Integration AG
  *
  * This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License 2.0
@@ -13,6 +13,7 @@ import java.io.Serializable;
 
 import org.eclipse.scout.rt.platform.IPlatform.State;
 import org.eclipse.scout.rt.platform.IPlatformListener;
+import org.eclipse.scout.rt.platform.cache.InvalidateCacheNotification;
 import org.eclipse.scout.rt.platform.service.IService;
 
 /**
@@ -43,9 +44,14 @@ public interface IClusterSynchronizationService extends IService {
   IClusterNodeStatusInfo getStatusInfo();
 
   /**
-   * @return info about sent and received messages of a given message type
+   * @return info about sent and received messages of a given message type. For {@link InvalidateCacheNotification} use {@link #getInvalidationStatusInfo(String)}.
    */
   IClusterNodeStatusInfo getStatusInfo(Class<? extends Serializable> messageType);
+
+  /**
+   * @return info about sent and received messages of {@link InvalidateCacheNotification}
+   */
+  IClusterNodeStatusInfo getInvalidationStatusInfo(String identifier);
 
   IClusterNotificationProperties getNotificationProperties();
 

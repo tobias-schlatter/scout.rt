@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -30,6 +31,7 @@ import org.eclipse.scout.rt.platform.IPlatform.State;
 import org.eclipse.scout.rt.platform.IPlatformListener;
 import org.eclipse.scout.rt.platform.Order;
 import org.eclipse.scout.rt.platform.PlatformEvent;
+import org.eclipse.scout.rt.platform.cache.InvalidateCacheNotification;
 import org.eclipse.scout.rt.platform.config.CONFIG;
 import org.eclipse.scout.rt.platform.transaction.AbstractTransactionMember;
 import org.eclipse.scout.rt.platform.transaction.ITransaction;
@@ -55,7 +57,7 @@ public class ClusterSynchronizationService implements IClusterSynchronizationSer
   private static final String TRANSACTION_MEMBER_ID = ClusterSynchronizationService.class.getName();
 
   private final ClusterNodeStatusInfo m_statusInfo = new ClusterNodeStatusInfo();
-  private final ConcurrentMap<Class<? extends Serializable>, ClusterNodeStatusInfo> m_messageStatusMap = new ConcurrentHashMap<>();
+  private final ConcurrentMap<MessageStatusMapKey, ClusterNodeStatusInfo> m_messageStatusMap = new ConcurrentHashMap<>();
 
   private final Subject m_subject;
   private final String m_userId;
@@ -87,9 +89,9 @@ public class ClusterSynchronizationService implements IClusterSynchronizationSer
     return m_statusInfo;
   }
 
-  protected ClusterNodeStatusInfo getStatusInfoInternal(Class<? extends Serializable> messageType) {
-    m_messageStatusMap.putIfAbsent(messageType, new ClusterNodeStatusInfo());
-    return m_messageStatusMap.get(messageType);
+  protected ClusterNodeStatusInfo getStatusInfoInternal(MessageStatusMapKey key) {
+    m_messageStatusMap.putIfAbsent(key, new ClusterNodeStatusInfo());
+    return m_messageStatusMap.get(key);
   }
 
   public NodeId getNodeId() {
@@ -185,8 +187,17 @@ public class ClusterSynchronizationService implements IClusterSynchronizationSer
     }
     for (IClusterNotificationMessage im : messages) {
       getStatusInfoInternal().updateSentStatus(im);
-      getStatusInfoInternal(im.getNotification().getClass()).updateReceiveStatus(im);
+      getStatusInfoInternal(createStatusInfoMapKey(im)).updateReceiveStatus(im);
     }
+  }
+
+  protected MessageStatusMapKey createStatusInfoMapKey(IClusterNotificationMessage message) {
+    Serializable notification = message.getNotification();
+    String identifier = null;
+    if (notification instanceof InvalidateCacheNotification invalidateCacheNotification) {
+      identifier = invalidateCacheNotification.getCacheId();
+    }
+    return new MessageStatusMapKey(notification.getClass(), identifier);
   }
 
   @Override
@@ -210,7 +221,7 @@ public class ClusterSynchronizationService implements IClusterSynchronizationSer
       LOG.trace("Handling {}", notificationMessage);
 
       getStatusInfoInternal().updateReceiveStatus(notificationMessage);
-      getStatusInfoInternal(notificationMessage.getNotification().getClass()).updateReceiveStatus(notificationMessage);
+      getStatusInfoInternal(createStatusInfoMapKey(notificationMessage)).updateReceiveStatus(notificationMessage);
 
       createRunContext().run(() -> {
         NotificationHandlerRegistry reg = BEANS.get(NotificationHandlerRegistry.class);
@@ -275,7 +286,52 @@ public class ClusterSynchronizationService implements IClusterSynchronizationSer
 
   @Override
   public IClusterNodeStatusInfo getStatusInfo(Class<? extends Serializable> messageType) {
-    return getStatusInfoInternal(messageType).getStatus();
+    return getStatusInfoInternal(new MessageStatusMapKey(messageType)).getStatus();
+  }
+
+  @Override
+  public IClusterNodeStatusInfo getInvalidationStatusInfo(String cacheId) {
+    return getStatusInfoInternal(new MessageStatusMapKey(InvalidateCacheNotification.class, cacheId)).getStatus();
+  }
+
+  protected static class MessageStatusMapKey {
+
+    private final Class<? extends Serializable> m_messageType;
+    private final String m_identifier;
+
+    public MessageStatusMapKey(Class<? extends Serializable> messageType) {
+      this(messageType, null);
+    }
+
+    public MessageStatusMapKey(Class<? extends Serializable> messageType, String identifier) {
+      m_messageType = messageType;
+      m_identifier = identifier;
+    }
+
+    public Class<? extends Serializable> getMessageType() {
+      return m_messageType;
+    }
+
+    public String getIdentifier() {
+      return m_identifier;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+
+      MessageStatusMapKey that = (MessageStatusMapKey) o;
+      return Objects.equals(m_messageType, that.m_messageType) && Objects.equals(m_identifier, that.m_identifier);
+    }
+
+    @Override
+    public int hashCode() {
+      int result = Objects.hashCode(m_messageType);
+      result = 31 * result + Objects.hashCode(m_identifier);
+      return result;
+    }
   }
 
   /**
