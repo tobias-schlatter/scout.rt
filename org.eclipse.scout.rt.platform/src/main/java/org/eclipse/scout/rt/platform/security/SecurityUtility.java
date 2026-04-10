@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PushbackInputStream;
+import java.io.SequenceInputStream;
 import java.net.URL;
 import java.security.DigestInputStream;
 import java.security.DigestOutputStream;
@@ -75,10 +76,35 @@ public final class SecurityUtility {
   }
 
   /**
+   * See {@link ISecurityProvider#encrypt(InputStream, EncryptionKey)}
+   */
+  public static InputStream encrypt(InputStream clearTextData, EncryptionKey key) {
+    InputStream encryptedData = SECURITY_PROVIDER.get().encrypt(clearTextData, key);
+    byte[] compatibilityHeader = key.getCompatibilityHeader();
+    if (compatibilityHeader != null) {
+      return new SequenceInputStream(new ByteArrayInputStream(compatibilityHeader), encryptedData);
+    }
+    return encryptedData;
+  }
+
+  /**
    * Note: for backward compatibility use a key created with
    * {@link #createDecryptionKey(PushbackInputStream, char[], byte[], int, EncryptionKey)}
    */
   public static void decrypt(InputStream encryptedData, OutputStream clearTextData, EncryptionKey key) {
+    PushbackInputStream input = checkCompatibilityHeader(encryptedData, key);
+    SECURITY_PROVIDER.get().decrypt(input, clearTextData, key);
+  }
+
+  /**
+   * See {@link ISecurityProvider#encrypt(InputStream, EncryptionKey)}
+   */
+  public static InputStream decrypt(InputStream encryptedData, EncryptionKey key) {
+    PushbackInputStream input = checkCompatibilityHeader(encryptedData, key);
+    return SECURITY_PROVIDER.get().decrypt(input, key);
+  }
+
+  private static PushbackInputStream checkCompatibilityHeader(InputStream encryptedData, EncryptionKey key) {
     PushbackInputStream input = new PushbackInputStream(encryptedData, 6);
     byte[] compatibilityHeader = extractCompatibilityHeader(input);// fast-forward inputStream to skip compatibility header
     if (compatibilityHeader != null) {
@@ -87,7 +113,7 @@ public final class SecurityUtility {
         Assertions.assertTrue(Arrays.equals(compatibilityHeader, keyCompatibilityHeader), "Key compatibility header mismatch.");
       }
     }
-    SECURITY_PROVIDER.get().decrypt(input, clearTextData, key);
+    return input;
   }
 
   /**
@@ -139,20 +165,14 @@ public final class SecurityUtility {
    * After this call the {@link PushbackInputStream} starts at the encrypted data.
    *
    * @param cipherStream
-   *     which can unread 6 charcters
+   *     which can unread 6 characters
    * @return extracted header <code>[yyyy:version]</code> or null of not found. yyyy is the 4-digit year and version is
    * freetext without the ']' character
    */
   public static byte[] extractCompatibilityHeader(PushbackInputStream cipherStream) {
     try {
       byte[] first6 = cipherStream.readNBytes(6);
-      if (first6.length == 6
-          && first6[0] == '['
-          && Character.isDigit(first6[1])
-          && Character.isDigit(first6[2])
-          && Character.isDigit(first6[3])
-          && Character.isDigit(first6[4])
-          && first6[5] == ':') {
+      if (isCompatibilityHeaderPrefix(first6)) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         buf.write(first6);
         int b;
@@ -171,6 +191,16 @@ public final class SecurityUtility {
     catch (IOException e) {
       throw new ProcessingException("Unable to decrypt data. Cannot read stream.", e);
     }
+  }
+
+  private static boolean isCompatibilityHeaderPrefix(byte[] first6) {
+    return first6.length == 6
+        && first6[0] == '['
+        && Character.isDigit(first6[1])
+        && Character.isDigit(first6[2])
+        && Character.isDigit(first6[3])
+        && Character.isDigit(first6[4])
+        && first6[5] == ':';
   }
 
   /**
@@ -293,6 +323,27 @@ public final class SecurityUtility {
   public static byte[] encrypt(byte[] clearTextData, char[] password, byte[] salt, int keyLen) {
     EncryptionKey key = createEncryptionKey(password, salt, keyLen);
     return encrypt(clearTextData, key);
+  }
+
+  /**
+   * Check if the {@code inputData} is encrypted by checking if it contains a compatibility header.
+   *
+   * @param inputData
+   *     which can unread 6 characters
+   * @return {@code true} if the {@code inputData} is encrypted, {@code false} otherwise.
+   * @throws ProcessingException
+   *     if there is an error reading the stream.
+   */
+  public static boolean isEncrypted(PushbackInputStream inputData) { // FIXME rsb remove if not used
+    try {
+      byte[] first6 = inputData.readNBytes(6);
+      //push back
+      inputData.unread(first6);
+      return isCompatibilityHeaderPrefix(first6);
+    }
+    catch (IOException e) {
+      throw new ProcessingException("Unable to read stream.", e);
+    }
   }
 
   /**

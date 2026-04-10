@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2024 BSI Business Systems Integration AG
+ * Copyright (c) 2010, 2026 BSI Business Systems Integration AG
  *
  * This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License 2.0
@@ -39,7 +39,7 @@ public class SecurityUtilityTest {
   private static final char[] PASSWORD = "insecure".toCharArray();
 
   @Test
-  public void testEncryption() {
+  public void testEncryption() throws IOException {
     final String origData = "origData";
     final byte[] salt = SecurityUtility.createRandomBytes();
     final byte[] inputBytes = origData.getBytes(ENCODING);
@@ -49,10 +49,15 @@ public class SecurityUtilityTest {
 
     byte[] encryptData3 = SecurityUtility.encrypt(new byte[]{}, PASSWORD, salt, KEY_LEN);
     byte[] decryptedEmpty = SecurityUtility.decrypt(encryptData3, PASSWORD, salt, KEY_LEN);
-    Assert.assertArrayEquals(decryptedEmpty, new byte[]{});
+    Assert.assertArrayEquals(new byte[]{}, decryptedEmpty);
 
     String decryptedString = new String(SecurityUtility.decrypt(encryptData, PASSWORD, salt, KEY_LEN), ENCODING);
     Assert.assertEquals(origData, decryptedString);
+
+    EncryptionKey key = SecurityUtility.createEncryptionKey(PASSWORD, salt, KEY_LEN);
+    InputStream encryptedStream = SecurityUtility.encrypt(new ByteArrayInputStream(inputBytes), key);
+    InputStream decryptedStream = SecurityUtility.decrypt(encryptedStream, key);
+    Assert.assertEquals(origData, new String(decryptedStream.readAllBytes(), ENCODING));
   }
 
   @Test(expected = AssertionException.class)
@@ -403,5 +408,28 @@ public class SecurityUtilityTest {
 
     SecurityUtility.createEncryptionKey(PASSWORD, "salty".getBytes(StandardCharsets.US_ASCII), 192);
     SecurityUtility.createEncryptionKey(PASSWORD, "salty".getBytes(StandardCharsets.US_ASCII), 256);
+  }
+
+  @Test
+  public void testIsEncrypted() {
+    final String origData = "origData";
+    final byte[] salt = SecurityUtility.createRandomBytes();
+    final byte[] inputBytes = origData.getBytes(ENCODING);
+
+    PushbackInputStream inputStream = new PushbackInputStream(new ByteArrayInputStream(inputBytes), 6);
+    Assert.assertFalse(SecurityUtility.isEncrypted(inputStream));
+    Assert.assertFalse(SecurityUtility.isEncrypted(inputStream)); // can be called multiple times
+
+    byte[] encryptData = SecurityUtility.encrypt(inputBytes, PASSWORD, salt, KEY_LEN);
+
+    PushbackInputStream encryptedStream = new PushbackInputStream(new ByteArrayInputStream(encryptData), 6);
+    Assert.assertTrue(SecurityUtility.isEncrypted(encryptedStream));
+    Assert.assertTrue(SecurityUtility.isEncrypted(encryptedStream)); // can be called multiple times
+
+    byte[] decryptedData = SecurityUtility.decrypt(encryptData, PASSWORD, salt, KEY_LEN);
+
+    PushbackInputStream decryptedStream = new PushbackInputStream(new ByteArrayInputStream(decryptedData), 6);
+    Assert.assertFalse(SecurityUtility.isEncrypted(decryptedStream));
+    Assert.assertFalse(SecurityUtility.isEncrypted(decryptedStream)); // can be called multiple times
   }
 }
