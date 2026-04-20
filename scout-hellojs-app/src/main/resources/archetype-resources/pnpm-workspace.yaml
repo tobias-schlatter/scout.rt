@@ -1,7 +1,11 @@
 #set( $symbol_dollar = '$' )
 #set( $symbol_pound = '#' )
 #set( $symbol_escape = '\' )
-ignoreScripts: true  $symbol_pound do not execute scripts (see https://pnpm.io/settings#ignorescripts)
+ignoreScripts: true  $symbol_pound do not execute scripts (see https://pnpm.io/settings${symbol_pound}ignorescripts)
+minimumReleaseAge: 2880 $symbol_pound two days (see https://pnpm.io/settings${symbol_pound}minimumreleaseage)
+minimumReleaseAgeExclude: $symbol_pound list package name patterns for which always the newest version should be used
+  - '@eclipse-scout/*'
+  - '@${simpleArtifactName}/*'
 
 packages:
 - '.'

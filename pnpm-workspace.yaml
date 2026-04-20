@@ -1,4 +1,7 @@
 ignoreScripts: true  # do not execute scripts (see https://pnpm.io/settings#ignorescripts)
+minimumReleaseAge: 2880 # two days (see https://pnpm.io/settings#minimumreleaseage)
+minimumReleaseAgeExclude: # list package name patterns for which always the newest version should be used
+  - '@eclipse-scout/*'
 
 packages:
   - 'eclipse-scout-cli'
