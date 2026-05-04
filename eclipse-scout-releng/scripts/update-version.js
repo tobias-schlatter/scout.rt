@@ -18,33 +18,7 @@ process.on('unhandledRejection', err => {
 });
 
 const path = require('path');
-const fs = require('fs');
-const findWorkspacePackages = require('@pnpm/find-workspace-packages');
-const fsp = fs.promises;
-
-const writePackageJson = async (fileName, file, verbose) => {
-  const newContentCompact = JSON.stringify(file);
-  const currentContent = await fsp.readFile(fileName, 'utf-8');
-  const currentContentCompact = JSON.stringify(JSON.parse(currentContent));
-  if (currentContentCompact === newContentCompact) {
-    // only change in formatting: skip write
-    return;
-  }
-
-  let newContent = JSON.stringify(file, null, 2);
-  if (!newContent.endsWith('\n')) {
-    // ensure file ends with a new line
-    newContent += '\n';
-  }
-  if (verbose) {
-    console.log(`file: ${fileName}; new content:\n${newContent}`);
-  }
-
-  await fsp.writeFile(fileName, newContent, 'utf-8');
-  if (verbose) {
-    console.log(`file ${fileName} saved`);
-  }
-};
+const collectModulesInWorkspace = require('@eclipse-scout/pnpm').collectModulesInWorkspace;
 
 /**
  * Generates a timestamp with the pattern yyyyMMddHHmmss
@@ -144,41 +118,6 @@ const updateDependencyConstraints = ({dependencies, workspaceModuleNames = [], u
   }
 };
 
-/**
- * Gets the directory closest to the file-system root that contains a 'pnpm-workspace.yaml' file. The search starts at the given start dir stepping up the parent directories.
- * @param dir where to start searching.
- * @returns {Promise<*>}
- */
-const findWorkspaceFileDir = async dir => {
-  let pnpmWorkspace = null;
-  let parentDir = dir;
-  let currentDir;
-  do {
-    currentDir = parentDir;
-    parentDir = path.join(currentDir, '../');
-    let candidate = path.join(currentDir, 'pnpm-workspace.yaml');
-    if (fs.existsSync(candidate)) {
-      pnpmWorkspace = currentDir;
-    }
-  } while (currentDir !== parentDir);
-  return pnpmWorkspace;
-};
-
-const collectModulesInWorkspace = async (startDir, verbose, workspaceRoot) => {
-  if (workspaceRoot) {
-    console.log(`use given workspace root: ${workspaceRoot}`);
-  } else {
-    workspaceRoot = await findWorkspaceFileDir(startDir);
-    if (workspaceRoot) {
-      console.log(`use workspace root found at: ${workspaceRoot}`);
-    } else {
-      workspaceRoot = path.join(startDir, '../'); // parent folder as default if no workspace file could be found
-      console.log(`unable to find workspace file. Use parent directory as workspace root: ${workspaceRoot}`);
-    }
-  }
-  return findWorkspacePackages.findWorkspacePackages(workspaceRoot);
-};
-
 const updateAllPackageJsons = async ({
                                        isSnapshot = true,
                                        updateWorkspaceDependencies = false,
@@ -192,8 +131,8 @@ const updateAllPackageJsons = async ({
   const filename = './package.json';
   const filePath = path.resolve(filename);
   const dir = path.dirname(filePath);
-  const workspaceModules = await collectModulesInWorkspace(dir, verbose, workspaceRoot);
-  if (!workspaceModules || workspaceModules.length === 0) {
+  const workspaceModules = await collectModulesInWorkspace(dir, workspaceRoot);
+  if (!workspaceModules?.length) {
     console.log('no modules found');
     return;
   }
@@ -271,7 +210,7 @@ const updateAllPackageJsons = async ({
     });
 
     if (!dryrun) {
-      await writePackageJson(path.join(module.dir, 'package.json'), packageJson, verbose);
+      await module.writeProjectManifest(packageJson);
     } else {
       console.log(JSON.stringify(packageJson, null, 2));
     }
