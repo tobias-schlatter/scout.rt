@@ -51,7 +51,7 @@ export async function computeOverrides(lockfileDir: string, workspaceRoot: strin
   }
 
   const overrides = [...collector]
-    .map(([pair, override]) => [pair, override.dependency.version])
+    .map(([key, override]) => [key, override.dependency.version])
     .sort();
   return Object.fromEntries(overrides);
 }
@@ -81,18 +81,15 @@ async function visit(collector: Map<string, Override>, versionCounter: Map<strin
     return !isInOwnWorkspace; // skip subtree if package is part of pnpm-workspace as it will be visited anyway later on
   }
   countDependencyVersions(versionCounter, parent, dependency);
-  if (await isFixedDependency(parent, dependency)) {
-    // there is no need to apply an override if the dependency is no range
-    return true; // continue stepping into dependency
-  }
-  return registerOverride(collector, parent, dependency);
+  const isRangeDependency = !await isFixedDependency(parent, dependency);
+  return registerOverride(collector, parent, dependency, isRangeDependency);
 }
 
 async function isFixedDependency(parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo): Promise<boolean> {
   let dependencyVersionSpecifier = dependency.specifier;
   if (!dependencyVersionSpecifier) {
     let parentPackage = PACKAGE_JSON_CACHE.get(parent.path);
-    if (!parentPackage) {
+    if (parentPackage === undefined) {
       const exists = await fs.stat(parent.path).then(() => true).catch(() => false);
       parentPackage = exists ? await readPackageJsonFromDir(parent.path) : null;
       PACKAGE_JSON_CACHE.set(parent.path, parentPackage);
@@ -110,7 +107,7 @@ async function isFixedDependency(parent: NodePackageVisitInfo, dependency: NodeP
   return dependencyVersionSpecifier && FIX_VERSION_REGEX.test(dependencyVersionSpecifier);
 }
 
-function registerOverride(collector: Map<string, Override>, parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo): boolean {
+function registerOverride(collector: Map<string, Override>, parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo, isRangeDependency: boolean): boolean {
   let parentPart = parent.name;
   const addVersion = !parent.version.startsWith('link:') && !SNAPSHOT_REGEX.test(parent.version);
   if (addVersion) {
@@ -120,7 +117,7 @@ function registerOverride(collector: Map<string, Override>, parent: NodePackageV
   if (collector.has(key)) {
     return false; // skip subtree, has already been processed
   }
-  collector.set(key, {parent, dependency});
+  collector.set(key, {parent, dependency, isRangeDependency});
   return true; // continue stepping
 }
 
@@ -143,13 +140,22 @@ function compact(collector: Map<string, Override>, versionCounter: Map<string, M
   const unique = new Map<string, string>(Array.from(versionCounter)
     .filter(([name, versions]) => versions.size === 1)
     .map(([name, versions]) => [name, versions.keys().next().value]));
+  const newEntries = new Map<string, Override>();
   for (const [key, override] of collector.entries()) {
-    if (unique.has(override.dependency.name)) {
+    if (!override.isRangeDependency) {
+      collector.delete(key);
+    } else if (unique.has(override.dependency.name)) {
+      // dependency completely unique: replace with a single override without parent
+      newEntries.set(override.dependency.name, override);
+      collector.delete(key);
+    } else if (unique.has(override.parent.name)) {
+      // parent version is unique: no need to add version to key: remove old one having the version and add a new one without
+      newEntries.set(`${override.parent.name}>${override.dependency.name}`, override);
       collector.delete(key);
     }
   }
-  for (const [dependencyName, dependencyVersion] of unique.entries()) {
-    collector.set(dependencyName, {dependency: {name: dependencyName, version: dependencyVersion, path: null}});
+  for (const [key, value] of newEntries.entries()) {
+    collector.set(key, value);
   }
 }
 
@@ -176,4 +182,4 @@ function logNonUniqueWorkspaceVersions(versionCounter: Map<string, Map<string, s
   }
 }
 
-export type Override = { parent?: NodePackageVisitInfo; dependency: NodePackageVisitInfo };
+export type Override = { parent?: NodePackageVisitInfo; dependency: NodePackageVisitInfo; isRangeDependency: boolean };
