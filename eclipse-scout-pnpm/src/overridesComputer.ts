@@ -22,10 +22,16 @@ const FIX_VERSION_REGEX = /^=?\d+\.\d+\.\d+(-.*)?$/;
 
 const PACKAGE_JSON_CACHE = new Map<string, PackageManifest>(); // TODO: find better solution
 
-export async function updateAllOverrides(dir: string): Promise<void> {
-  const workspaces = await findPnpmWorkspaces(dir);
+export async function updateAllOverrides(dir: string, logConverge: ConvergeLogLevel): Promise<void> {
+  const workspaces = (await findPnpmWorkspaces(dir)).sort(); // root workspace first
+  if (!workspaces?.length) {
+    process.exitCode = 2;
+    throw new Error(`No pnpm-workspaces found in directory '${dir}'.`);
+  }
+
   for (const workspace of workspaces) {
-    const overrides = await computeOverrides(dir, workspace);
+    const isFirst = workspace === workspaces[0];
+    const overrides = await computeOverrides(dir, workspace, isFirst ? logConverge : 'none');
     await updateOverrides(workspace, overrides);
   }
 }
@@ -101,17 +107,15 @@ export async function writeYaml(file: string, doc: YAML.Document): Promise<void>
   return await fs.writeFile(file, content, 'utf8');
 }
 
-export async function computeOverrides(lockfileDir: string, workspaceRoot: string, logConverge = false): Promise<Record<string, string>> {
+export async function computeOverrides(lockfileDir: string, workspaceRoot: string, logConverge: ConvergeLogLevel): Promise<Record<string, string>> {
   const collector = new Map<string, Override>();
-  const versionCounter = new Map<string, Map<string, string[]>>();
+  const versionCounter = new Map<string, Map<string, Set<string>>>();
   const packages = await getWorkspacePackages(lockfileDir, workspaceRoot);
   const collectOverrides = visit.bind(null, collector, versionCounter, packages);
   await visitPnpmWorkspace(lockfileDir, packages, collectOverrides);
 
   compact(collector, versionCounter);
-  if (logConverge) {
-    logNonUniqueWorkspaceVersions(versionCounter, false);
-  }
+  logNonUniqueWorkspaceVersions(versionCounter, logConverge);
 
   const overrides = [...collector]
     .map(([key, override]) => [key, override.dependency.version])
@@ -135,7 +139,7 @@ async function findPnpmWorkspaces(root: string): Promise<string[]> {
   return workspaceFiles.map(f => path.dirname(f));
 }
 
-async function visit(collector: Map<string, Override>, versionCounter: Map<string, Map<string, string[]>>, workspacePackages: string[], parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo): Promise<boolean> {
+async function visit(collector: Map<string, Override>, versionCounter: Map<string, Map<string, Set<string>>>, workspacePackages: string[], parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo): Promise<boolean> {
   if (SNAPSHOT_REGEX.test(dependency.version)) {
     // skip snapshot dependencies: they should not be fixed
     return true; // continue stepping into snapshots
@@ -151,23 +155,20 @@ async function visit(collector: Map<string, Override>, versionCounter: Map<strin
 }
 
 async function isFixedDependency(parent: NodePackageVisitInfo, dependency: NodePackageVisitInfo): Promise<boolean> {
-  let dependencyVersionSpecifier = dependency.specifier;
+  let parentPackage = PACKAGE_JSON_CACHE.get(parent.path);
+  if (parentPackage === undefined) {
+    const exists = await fileExists(parent.path);
+    parentPackage = exists ? await readPackageJsonFromDir(parent.path) : null;
+    PACKAGE_JSON_CACHE.set(parent.path, parentPackage);
+  }
+  const deps = {...parentPackage?.peerDependencies, ...parentPackage?.optionalDependencies, ...parentPackage?.devDependencies, ...parentPackage?.dependencies};
+  let dependencyVersionSpecifier = deps[dependency.name];
   if (!dependencyVersionSpecifier) {
-    let parentPackage = PACKAGE_JSON_CACHE.get(parent.path);
-    if (parentPackage === undefined) {
-      const exists = await fileExists(parent.path);
-      parentPackage = exists ? await readPackageJsonFromDir(parent.path) : null;
-      PACKAGE_JSON_CACHE.set(parent.path, parentPackage);
-    }
-    const deps = {...parentPackage?.dependencies, ...parentPackage?.optionalDependencies};
-    dependencyVersionSpecifier = deps[dependency.name];
-    if (!dependencyVersionSpecifier) {
-      // try npm: alias dependencies
-      const npmPrefix = `npm:${dependency.name}@`;
-      dependencyVersionSpecifier = Object.values(deps)
-        .find(d => d.startsWith(npmPrefix))
-        ?.substring(npmPrefix.length);
-    }
+    // try npm: alias dependencies
+    const npmPrefix = `npm:${dependency.name}@`;
+    dependencyVersionSpecifier = Object.values(deps)
+      .find(d => d.startsWith(npmPrefix))
+      ?.substring(npmPrefix.length);
   }
   return dependencyVersionSpecifier && FIX_VERSION_REGEX.test(dependencyVersionSpecifier);
 }
@@ -186,7 +187,7 @@ function registerOverride(collector: Map<string, Override>, parent: NodePackageV
   return true; // continue stepping
 }
 
-function countDependencyVersions(versionCounter: Map<string, Map<string, string[]>>, parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) {
+function countDependencyVersions(versionCounter: Map<string, Map<string, Set<string>>>, parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) {
   const name = dep.name;
   let existing = versionCounter.get(name);
   if (!existing) {
@@ -195,13 +196,13 @@ function countDependencyVersions(versionCounter: Map<string, Map<string, string[
   }
   let current = existing.get(dep.version);
   if (!current) {
-    current = [];
+    current = new Set();
     existing.set(dep.version, current);
   }
-  current.push(parent.path);
+  current.add(parent.path);
 }
 
-function compact(collector: Map<string, Override>, versionCounter: Map<string, Map<string, string[]>>) {
+function compact(collector: Map<string, Override>, versionCounter: Map<string, Map<string, Set<string>>>) {
   const unique = new Map<string, string>(Array.from(versionCounter)
     .filter(([name, versions]) => versions.size === 1)
     .map(([name, versions]) => [name, versions.keys().next().value]));
@@ -224,27 +225,26 @@ function compact(collector: Map<string, Override>, versionCounter: Map<string, M
   }
 }
 
-function logNonUniqueWorkspaceVersions(versionCounter: Map<string, Map<string, string[]>>, onlyLogWorkspaceInternal: boolean) {
-  const isOutsideWorkspace = (v: string[]) => v.some(p => p.indexOf('.pnpm') >= 0);
+function logNonUniqueWorkspaceVersions(versionCounter: Map<string, Map<string, Set<string>>>, logConverge: ConvergeLogLevel) {
+  if (logConverge === 'none') {
+    return;
+  }
+
+  const isOutsideWorkspace = (v: Set<string>) => [...v].some(p => p.indexOf('.pnpm') >= 0);
   for (const [dependencyName, versionsMap] of versionCounter.entries()) {
     if (versionsMap.size <= 1) {
       continue;
     }
     const versionsFromExternals = [...versionsMap.values()].filter(isOutsideWorkspace).length;
-    if (versionsFromExternals === 0) {
-      // mixed version in workspace only
+    if (versionsFromExternals === 0 || (logConverge === 'all' && versionsFromExternals === 1)) {
+      // mixed versions
       const versionUsages = [...versionsMap.entries()]
-        .map(([k, v]) => `${k}: [\n${v.join(',\n')}\n]`)
+        .map(([k, v]) => `${k}: [\n  ${[...v].sort().join(',\n  ')}\n]`)
         .join('\n');
-      console.warn(`Dependency '${dependencyName}' does not converge:\n${versionUsages}`);
-    } else if (!onlyLogWorkspaceInternal && versionsFromExternals <= 1) {
-      // mixed version between the ones from the workspace and the single one from externals
-      const versionUsages = [...versionsMap.entries()]
-        .map(([k, v]) => `${k}: [\n${v.join(',\n')}\n]`)
-        .join('\n');
-      console.warn(`Dependency '${dependencyName}' does not converge:\n${versionUsages}`);
+      console.warn(`Dependency '${dependencyName}' does not converge:\n${versionUsages}\n`);
     }
   }
 }
 
 export type Override = { parent?: NodePackageVisitInfo; dependency: NodePackageVisitInfo; isRangeDependency: boolean };
+export type ConvergeLogLevel = 'all' | 'own' | 'none';

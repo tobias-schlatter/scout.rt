@@ -14,4 +14,4 @@ import {pnpmInstall} from '../src/install.ts';
 // e.g. '/home/bsiag.local/mvi/dev/projects/suite/26.2'
 const pnpmWorkspaceRoot = process.cwd();
 
-await pnpmInstall(pnpmWorkspaceRoot);
+await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'all'});

@@ -11,24 +11,23 @@
 import {fork} from 'node:child_process';
 import process from 'node:process';
 import path from 'node:path';
-
-import {parseYaml, updateAllOverrides, writeYaml} from './overridesComputer.ts';
-import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import YAML from 'yaml';
+
+import {type ConvergeLogLevel, parseYaml, updateAllOverrides, writeYaml} from './overridesComputer.ts';
+import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {fileExists} from './fileExists.ts';
 
-export async function pnpmInstall(dir: string, options: UpdateOptions = {updateMode: 'minimum'}): Promise<void> {
-  // const commonPnpmConfig = ['--recursive', '--ignore-scripts', '--config.link-workspace-packages=true', '--config.prefer-workspace-packages=true'];
-  // if (options.updateMode === 'maximum') {
-  //   await disableScoutOverrides(dir);
-  //   await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
-  // } else {
-  //   await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
-  //   await disableScoutOverrides(dir);
-  //   await runPnpm(...['install', '--no-lockfile', ...commonPnpmConfig]);
-  // }
-
-  return await updateAllOverrides(dir);
+export async function pnpmInstall(dir: string, options: UpdateOptions = {updateMode: 'snapshots', logConverge: 'own'}): Promise<void> {
+  const commonPnpmConfig = ['--recursive', '--no-lockfile', '--ignore-scripts', '--config.link-workspace-packages=true', '--config.prefer-workspace-packages=true'];
+  if (options.updateMode === 'possible') {
+    await disableScoutOverrides(dir);
+  }
+  await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
+  if (options.updateMode === 'required') {
+    await disableScoutOverrides(dir);
+    await runPnpm(...['install', ...commonPnpmConfig]);
+  }
+  return await updateAllOverrides(dir, options.logConverge);
 }
 
 export async function disableScoutOverrides(dir: string): Promise<void> {
@@ -73,7 +72,8 @@ export async function runPnpm(...args: string[]): Promise<number> {
 }
 
 export interface UpdateOptions {
-  updateMode?: 'minimum' | 'maximum';
+  updateMode?: 'required' | 'possible' | 'snapshots';
+  logConverge?: ConvergeLogLevel;
 }
 
 export async function pnpmCjs(): Promise<string> {

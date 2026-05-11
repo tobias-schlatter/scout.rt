@@ -30,14 +30,10 @@ export type NodePackageVisitInfo = {
    * absolute path
    */
   path: string;
-  /**
-   * only available for project dependencies
-   */
-  specifier?: string;
 };
 export type NodePackageVisitor = (parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) => Promise<boolean>;
 
-export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name: string; version: string; path: string }, specifier: string): NodePackageVisitInfo {
+export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name: string; version: string; path: string }): NodePackageVisitInfo {
   const packagePath = path.isAbsolute(packageInfo.path) ? packageInfo.path : path.resolve(lockfileDir, packageInfo.path);
   if (!packageInfo?.name || !packageInfo?.version) {
     throw new Error(`'name' and 'version' attributes are missing in '${packagePath}'.`);
@@ -45,8 +41,7 @@ export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name:
   return {
     name: packageInfo.name,
     version: packageInfo.version,
-    path: packagePath,
-    specifier
+    path: packagePath
   };
 }
 
@@ -107,7 +102,7 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
   const importerId = getLockfileImporterId(opts.lockfileDir, packagePath);
   const parentId: TreeNodeId = {type: 'importer', importerId};
   let rootPackageJson = await readPackageJson(opts.lockfileDir, packagePath);
-  const rootInfo = toNodePackageVisitInfo(opts.lockfileDir, rootPackageJson, rootPackageJson.version);
+  const rootInfo = toNodePackageVisitInfo(opts.lockfileDir, rootPackageJson);
 
   for (const dependenciesField of DEPENDENCIES_FIELDS.sort().filter(dependenciesField => opts.include[dependenciesField])) {
     let importer = currentLockfile.importers[importerId];
@@ -130,7 +125,7 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
         virtualStoreDir: opts.virtualStoreDir,
         virtualStoreDirMaxLength: opts.virtualStoreDirMaxLength
       });
-      const stepInto = await visitor(rootInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo, importer.specifiers[packageInfo.name]));
+      const stepInto = await visitor(rootInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo));
       if (stepInto) {
         const childNodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: currentLockfile.importers});
         await visitTree(cache, {

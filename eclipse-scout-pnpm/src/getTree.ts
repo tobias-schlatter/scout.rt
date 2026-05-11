@@ -130,7 +130,7 @@ export async function visitTree(dependenciesCache: DependenciesCache, opts: GetT
     });
     let circular: boolean;
     let newEntry: PackageNode | null = null;
-    const stepInto = opts.excludePeerDependencies && packageInfo.isPeer ? false : await visitor(parentInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo, snapshot['specifiers']?.[packageInfo.name]));
+    const stepInto = opts.excludePeerDependencies && packageInfo.isPeer ? false : await visitor(parentInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo));
     const nodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: opts.importers});
     const childTreeMaxDepth = stepInto ? opts.maxDepth - 1 : -1;
     if (nodeId == null) {
