@@ -8,51 +8,79 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
-import {updateAllOverrides} from './overridesComputer.ts';
-import {type InstallCommandOptions} from '@pnpm/plugin-commands-installation';
+import {fork} from 'node:child_process';
+import process from 'node:process';
+import path from 'node:path';
 
-export async function pnpmInstall(dir: string, updateSnapshots = true): Promise<void> {
-  // const overrides = {}; // TODO
-  //
-  // const updateOptions: UpdateCommandOptions = {
-  //   ...baseConfig,
-  //   recursive: true,
-  //   overrides: overrides,
-  //   dir: dir,
-  //   rootProjectManifestDir: dir,
-  //   latest: true,
-  //   save: false,
-  //   linkWorkspacePackages: true,
-  //   preferWorkspacePackages: true
-  // };
-  // await update.handler(updateOptions);
-  //
-  //
-  // const installConfig = await getConfig({recursive: true}, {
-  //   excludeReporter: false,
-  //   globalDirShouldAllowWrite: true,
-  //   rcOptionsTypes: install.rcOptionsTypes(),
-  //   workspaceDir: dir,
-  //   checkUnknownSetting: false,
-  //   ignoreNonAuthSettingsFromLocal: false
-  // });
-  // const installOptions: InstallCommandOptions = {
-  //   ...installConfig,
-  //   recursive: true,
-  //   overrides: undefined,
-  //   dir: dir,
-  //   rootProjectManifestDir: dir,
-  //   save: false,
-  //   linkWorkspacePackages: true,
-  //   preferWorkspacePackages: true
-  // };
-  // await install.handler(installOptions);
+import {parseYaml, updateAllOverrides, writeYaml} from './overridesComputer.ts';
+import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
+import YAML from 'yaml';
+import {fileExists} from './fileExists.ts';
 
-  await updateAllOverrides(dir);
+export async function pnpmInstall(dir: string, options: UpdateOptions = {updateMode: 'minimum'}): Promise<void> {
+  // const commonPnpmConfig = ['--recursive', '--ignore-scripts', '--config.link-workspace-packages=true', '--config.prefer-workspace-packages=true'];
+  // if (options.updateMode === 'maximum') {
+  //   await disableScoutOverrides(dir);
+  //   await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
+  // } else {
+  //   await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
+  //   await disableScoutOverrides(dir);
+  //   await runPnpm(...['install', '--no-lockfile', ...commonPnpmConfig]);
+  // }
+
+  return await updateAllOverrides(dir);
 }
 
-export type UpdateCommandOptions = InstallCommandOptions & {
-  interactive?: boolean;
-  latest?: boolean;
-};
+export async function disableScoutOverrides(dir: string): Promise<void> {
+  const pnpmWorkspaceManifestPath = path.resolve(dir, WORKSPACE_MANIFEST_FILENAME);
+  const pnpmWorkspaceManifest = await parseYaml(pnpmWorkspaceManifestPath);
+  const existingOverrides = pnpmWorkspaceManifest.get('overrides') as YAML.YAMLMap;
+  if (!existingOverrides) {
+    // there are no overrides: nothing to remove and nothing to restore
+    return;
+  }
+  existingOverrides.delete('<<');
+  await writeYaml(pnpmWorkspaceManifestPath, pnpmWorkspaceManifest);
+}
 
+export async function restoreOverrides(dir: string, origOverrides: YAML.YAMLMap): Promise<void> {
+  if (!origOverrides) {
+    return; // nothing to restore
+  }
+  const pnpmWorkspaceManifestPath = path.resolve(dir, WORKSPACE_MANIFEST_FILENAME);
+  const pnpmWorkspaceManifest = await parseYaml(pnpmWorkspaceManifestPath);
+  pnpmWorkspaceManifest.set('overrides', origOverrides);
+  return await writeYaml(pnpmWorkspaceManifestPath, pnpmWorkspaceManifest);
+}
+
+export async function runPnpm(...args: string[]): Promise<number> {
+  const pnpm = await pnpmCjs();
+  return new Promise((resolve, reject) => {
+    const child = fork(pnpm, args, {
+      cwd: process.cwd(),
+      stdio: 'inherit'
+    });
+
+    child.on('error', reject);
+    child.on('exit', (code: number, signal: NodeJS.Signals) => {
+      if (code === 0) {
+        resolve(code);
+      } else {
+        reject(new Error(`Child exited with code ${code}${signal ? `, signal ${signal}` : ''}`));
+      }
+    });
+  });
+}
+
+export interface UpdateOptions {
+  updateMode?: 'minimum' | 'maximum';
+}
+
+export async function pnpmCjs(): Promise<string> {
+  const pathCandidates = [
+    '../../lib/node_modules/pnpm/bin/pnpm.cjs', // e.g. Linux
+    '../node_modules/pnpm/bin/pnpm.cjs' // e.g. Windows
+  ];
+  const pnpmCjs = pathCandidates.find(fileExists);
+  return path.resolve(process.execPath, pnpmCjs);
+}

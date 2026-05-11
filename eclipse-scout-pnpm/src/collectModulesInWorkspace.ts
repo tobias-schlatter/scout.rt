@@ -9,9 +9,9 @@
  */
 
 import path from 'node:path';
-import {promises as fs} from 'node:fs';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {findWorkspacePackages, type Project} from '@pnpm/workspace.find-packages';
+import {fileExists} from './fileExists.ts';
 
 /**
  * Gets the directory closest to the file-system root that contains a 'pnpm-workspace.yaml' file. The search starts at the given start dir stepping up the parent directories.
@@ -25,8 +25,7 @@ export async function findWorkspaceFileDir(dir: string): Promise<string> {
     currentDir = parentDir;
     parentDir = path.join(currentDir, '../');
     const candidate = path.join(currentDir, WORKSPACE_MANIFEST_FILENAME);
-    const exists = await fs.stat(candidate).then(() => true).catch(() => false);
-    if (exists) {
+    if (await fileExists(candidate)) {
       pnpmWorkspace = currentDir;
     }
   } while (currentDir !== parentDir);
