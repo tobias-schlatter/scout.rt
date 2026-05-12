@@ -8,10 +8,14 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
+import {test, type TestContext} from 'node:test';
+import assert from 'node:assert';
+import path from 'node:path';
+
 import {pnpmInstall} from '../src/install.ts';
 
-// e.g. '/home/bsiag.local/mvi/IdeaProjects/hellojs/hellojs'
-// e.g. '/home/bsiag.local/mvi/dev/projects/suite/26.2'
-const pnpmWorkspaceRoot = process.cwd();
-
-await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'all'});
+test('install required', async (t: TestContext) => {
+  const pnpmWorkspaceRoot = path.resolve(process.cwd(), '../..');
+  await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'all'});
+  assert.strictEqual(1, 1);
+});

@@ -22,10 +22,10 @@ export async function pnpmInstall(dir: string, options: UpdateOptions = {updateM
   if (options.updateMode === 'possible') {
     await disableScoutOverrides(dir);
   }
-  await runPnpm(...['update', '--no-save', ...commonPnpmConfig]);
+  await runPnpm(dir, ...['update', '--no-save', ...commonPnpmConfig]);
   if (options.updateMode === 'required') {
     await disableScoutOverrides(dir);
-    await runPnpm(...['install', ...commonPnpmConfig]);
+    await runPnpm(dir, ...['install', ...commonPnpmConfig]);
   }
   return await updateAllOverrides(dir, options.logConverge);
 }
@@ -52,11 +52,11 @@ export async function restoreOverrides(dir: string, origOverrides: YAML.YAMLMap)
   return await writeYaml(pnpmWorkspaceManifestPath, pnpmWorkspaceManifest);
 }
 
-export async function runPnpm(...args: string[]): Promise<number> {
+export async function runPnpm(workingDir: string, ...args: string[]): Promise<number> {
   const pnpm = await pnpmCjs();
   return new Promise((resolve, reject) => {
     const child = fork(pnpm, args, {
-      cwd: process.cwd(),
+      cwd: workingDir,
       stdio: 'inherit'
     });
 

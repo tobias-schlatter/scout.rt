@@ -13,11 +13,11 @@ import {type PackageSnapshots, type ProjectSnapshot} from '@pnpm/lockfile.fs';
 import {type DepTypes} from '@pnpm/lockfile.detect-dep-types';
 import {type Finder, type Registries} from '@pnpm/types';
 import {type PackageNode} from './PackageNode.ts';
-import {getPkgInfo, type PackageInfo} from './getPkgInfo.ts';
+import {getPkgInfo} from './getPkgInfo.ts';
 import {getTreeNodeChildId} from './getTreeNodeChildId.ts';
 import {DependenciesCache} from './DependenciesCache.ts';
 import {serializeTreeNodeId, type TreeNodeId} from './TreeNodeId.ts';
-import {type NodePackageVisitor, toNodePackageVisitInfo} from './dependencyVisitor.ts';
+import {type NodePackageVisitInfo, type NodePackageVisitor, toNodePackageVisitInfo} from './dependencyVisitor.ts';
 
 export interface GetTreeOpts {
   maxDepth: number;
@@ -54,7 +54,7 @@ export interface DependencyInfo {
   height: number | 'unknown';
 }
 
-export async function visitTree(dependenciesCache: DependenciesCache, opts: GetTreeOpts, keypath: Keypath, parentId: TreeNodeId, parentInfo: PackageInfo, visitor: NodePackageVisitor): Promise<DependencyInfo> {
+export async function visitTree(dependenciesCache: DependenciesCache, opts: GetTreeOpts, keypath: Keypath, parentId: TreeNodeId, parentInfo: NodePackageVisitInfo, visitor: NodePackageVisitor): Promise<DependencyInfo> {
   if (opts.maxDepth <= 0) {
     return {dependencies: [], height: 'unknown'};
   }

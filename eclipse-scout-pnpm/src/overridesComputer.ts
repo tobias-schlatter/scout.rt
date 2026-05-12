@@ -10,7 +10,7 @@
 import path from 'node:path';
 import {promises as fs} from 'node:fs';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
-import {type NodePackageVisitInfo, visitPnpmWorkspace} from './dependencyVisitor.ts';
+import {type NodePackageVisitInfo, visitDependenciesForPackages} from './dependencyVisitor.ts';
 import YAML from 'yaml';
 import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 import {type PackageManifest} from '@pnpm/types';
@@ -112,7 +112,7 @@ export async function computeOverrides(lockfileDir: string, workspaceRoot: strin
   const versionCounter = new Map<string, Map<string, Set<string>>>();
   const packages = await getWorkspacePackages(lockfileDir, workspaceRoot);
   const collectOverrides = visit.bind(null, collector, versionCounter, packages);
-  await visitPnpmWorkspace(lockfileDir, packages, collectOverrides);
+  await visitDependenciesForPackages(lockfileDir, packages, collectOverrides);
 
   compact(collector, versionCounter);
   logNonUniqueWorkspaceVersions(versionCounter, logConverge);

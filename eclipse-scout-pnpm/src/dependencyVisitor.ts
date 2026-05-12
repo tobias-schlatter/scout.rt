@@ -17,101 +17,49 @@ import {type DepTypes, detectDepTypes} from '@pnpm/lockfile.detect-dep-types';
 import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {DEPENDENCIES_FIELDS, type DependenciesField, type Registries} from '@pnpm/types';
-import {Keypath, visitTree} from './getTree.ts';
+import {type GetTreeOpts, Keypath, visitTree} from './getTree.ts';
 import {type TreeNodeId} from './TreeNodeId.ts';
 import {DependenciesCache} from './DependenciesCache.ts';
 import {getTreeNodeChildId} from './getTreeNodeChildId.ts';
 import {getPkgInfo} from './getPkgInfo.ts';
 
-export type NodePackageVisitInfo = {
-  name: string;
-  version: string;
-  /**
-   * absolute path
-   */
-  path: string;
-};
-export type NodePackageVisitor = (parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) => Promise<boolean>;
-
-export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name: string; version: string; path: string }): NodePackageVisitInfo {
-  const packagePath = path.isAbsolute(packageInfo.path) ? packageInfo.path : path.resolve(lockfileDir, packageInfo.path);
-  if (!packageInfo?.name || !packageInfo?.version) {
-    throw new Error(`'name' and 'version' attributes are missing in '${packagePath}'.`);
-  }
-  return {
-    name: packageInfo.name,
-    version: packageInfo.version,
-    path: packagePath
-  };
-}
-
-export async function visitPnpmWorkspace(lockfileDir: string, packages: string[], visitor: NodePackageVisitor) {
-  const maybeOpts = {
-    depth: Infinity,
-    excludePeerDependencies: true,
-    include: {dependencies: true, devDependencies: true, optionalDependencies: true},
-    lockfileDir: lockfileDir,
-    checkWantedLockfileOnly: false,
-    virtualStoreDirMaxLength: process.platform === 'win32' ? 60 : 120
-  };
-
-  const modulesDir = await realpathMissing(path.join(maybeOpts.lockfileDir, 'node_modules'));
+export async function visitDependenciesForPackages(lockfileDir: string, packages: string[], visitor: NodePackageVisitor) {
+  const modulesDir = await realpathMissing(path.join(lockfileDir, 'node_modules'));
   const modules = await readModulesManifest(modulesDir);
   const registries = normalizeRegistries({...modules?.registries});
   const internalPnpmDir = path.join(modulesDir, '.pnpm');
   const currentLockfile = await readCurrentLockfile(internalPnpmDir, {ignoreIncompatible: false});
-  const wantedLockfile = await readWantedLockfile(maybeOpts.lockfileDir, {ignoreIncompatible: false});
+  const wantedLockfile = await readWantedLockfile(lockfileDir, {ignoreIncompatible: false});
   const depTypes = detectDepTypes(currentLockfile);
   const dependenciesCache = new DependenciesCache();
   const opts = {
-    depth: maybeOpts.depth,
-    excludePeerDependencies: maybeOpts.excludePeerDependencies,
-    include: maybeOpts.include ?? {
-      dependencies: true,
-      devDependencies: true,
-      optionalDependencies: true
-    },
+    depth: Infinity,
+    excludePeerDependencies: true,
+    include: {dependencies: true, devDependencies: true, optionalDependencies: true},
     registries,
     onlyProjects: false,
     skipped: new Set(modules?.skipped ?? []),
-    lockfileDir: maybeOpts.lockfileDir,
-    checkWantedLockfileOnly: maybeOpts.checkWantedLockfileOnly,
+    lockfileDir: lockfileDir,
+    checkWantedLockfileOnly: false,
     virtualStoreDir: modules?.virtualStoreDir,
-    virtualStoreDirMaxLength: modules?.virtualStoreDirMaxLength ?? maybeOpts.virtualStoreDirMaxLength
+    virtualStoreDirMaxLength: modules?.virtualStoreDirMaxLength ?? (process.platform === 'win32' ? 60 : 120)
   };
-
-  await Promise.all(packages.map(async projectPath => {
-    await visitDependenciesForPackage(projectPath, currentLockfile, wantedLockfile, depTypes, dependenciesCache, opts, visitor);
-  }));
+  await Promise.all(packages.map(async pkg => await visitDependenciesForPackage(pkg, currentLockfile, wantedLockfile, depTypes, dependenciesCache, visitor, opts)));
 }
 
-async function visitDependenciesForPackage(packagePath: string, currentLockfile: LockfileObject, wantedLockfile: LockfileObject | null, depTypes: DepTypes, cache: DependenciesCache,
-  opts: {
-    depth: number;
-    excludePeerDependencies?: boolean;
-    include: { [dependenciesField in DependenciesField]: boolean };
-    registries: Registries;
-    onlyProjects?: boolean;
-    skipped: Set<string>;
-    lockfileDir: string;
-    checkWantedLockfileOnly?: boolean;
-    virtualStoreDir?: string;
-    virtualStoreDirMaxLength: number;
-  }, visitor: NodePackageVisitor
-): Promise<void> {
-  const importerId = getLockfileImporterId(opts.lockfileDir, packagePath);
+async function visitDependenciesForPackage(packagePath: string, currentLockfile: LockfileObject, wantedLockfile: LockfileObject, depTypes: DepTypes, cache: DependenciesCache,
+  visitor: NodePackageVisitor, opts: PackageVisitOptions): Promise<void> {
+  const importerId = getLockfileImporterId(opts.lockfileDir, path.resolve(opts.lockfileDir, packagePath));
   const parentId: TreeNodeId = {type: 'importer', importerId};
-  let rootPackageJson = await readPackageJson(opts.lockfileDir, packagePath);
-  const rootInfo = toNodePackageVisitInfo(opts.lockfileDir, rootPackageJson);
-
+  const rootInfo = toNodePackageVisitInfo(opts.lockfileDir, await readPackageJson(opts.lockfileDir, packagePath));
   for (const dependenciesField of DEPENDENCIES_FIELDS.sort().filter(dependenciesField => opts.include[dependenciesField])) {
     let importer = currentLockfile.importers[importerId];
     if (!importer) {
-      throw new Error(`Module of pnpm-workspace not found: '${importerId}'. Ensure the module is listed in each ${WORKSPACE_MANIFEST_FILENAME} and perform a pnpm install afterward.`);
+      throw new Error(`Module of pnpm-workspace not found: '${importerId}'. Ensure the module is listed in each ${WORKSPACE_MANIFEST_FILENAME} and try again.`);
     }
-    const topDeps = importer[dependenciesField] ?? {};
-    for (const alias in topDeps) {
-      const ref = topDeps[alias];
+    const resolvedDependencies = importer[dependenciesField] ?? {};
+    for (const alias in resolvedDependencies) {
+      const ref = resolvedDependencies[alias];
       const {pkgInfo: packageInfo} = getPkgInfo({
         alias,
         currentPackages: currentLockfile.packages ?? {},
@@ -125,10 +73,11 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
         virtualStoreDir: opts.virtualStoreDir,
         virtualStoreDirMaxLength: opts.virtualStoreDirMaxLength
       });
-      const stepInto = await visitor(rootInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo));
+      const depNodePackageVisitInfo = toNodePackageVisitInfo(opts.lockfileDir, packageInfo);
+      const stepInto = await visitor(rootInfo, depNodePackageVisitInfo);
       if (stepInto) {
         const childNodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: currentLockfile.importers});
-        await visitTree(cache, {
+        const visitOptions: GetTreeOpts = {
           currentPackages: currentLockfile.packages ?? {},
           excludePeerDependencies: opts.excludePeerDependencies,
           importers: currentLockfile.importers,
@@ -143,7 +92,8 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
           wantedPackages: wantedLockfile?.packages ?? {},
           virtualStoreDir: opts.virtualStoreDir,
           virtualStoreDirMaxLength: opts.virtualStoreDirMaxLength
-        }, Keypath.initialize(childNodeId), childNodeId, packageInfo, visitor);
+        };
+        await visitTree(cache, visitOptions, Keypath.initialize(childNodeId), childNodeId, depNodePackageVisitInfo, visitor);
       }
     }
   }
@@ -154,3 +104,39 @@ async function readPackageJson(workspaceRoot: string, packagePath: string): Prom
   const content = await readPackageJsonFromDir(dir);
   return {name: content.name, version: content.version, path: dir};
 }
+
+export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name: string; version: string; path: string }): NodePackageVisitInfo {
+  const packagePath = path.isAbsolute(packageInfo.path) ? packageInfo.path : path.resolve(lockfileDir, packageInfo.path);
+  if (!packageInfo?.name || !packageInfo?.version) {
+    throw new Error(`'name' and 'version' attributes are missing in '${packagePath}'.`);
+  }
+  return {
+    name: packageInfo.name,
+    version: packageInfo.version,
+    path: packagePath
+  };
+}
+
+export type NodePackageVisitInfo = {
+  name: string;
+  version: string;
+  /**
+   * absolute path
+   */
+  path: string;
+};
+
+export type NodePackageVisitor = (parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) => Promise<boolean>;
+
+type PackageVisitOptions = {
+  depth: number;
+  excludePeerDependencies?: boolean;
+  include: { [dependenciesField in DependenciesField]: boolean };
+  registries: Registries;
+  onlyProjects?: boolean;
+  skipped: Set<string>;
+  lockfileDir: string;
+  checkWantedLockfileOnly?: boolean;
+  virtualStoreDir?: string;
+  virtualStoreDirMaxLength: number;
+};
