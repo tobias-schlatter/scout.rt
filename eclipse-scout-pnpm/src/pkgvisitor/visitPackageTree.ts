@@ -8,53 +8,47 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
+// Inspired by https://github.com/pnpm/pnpm/blob/v10.26.1/reviewing/dependencies-hierarchy/src/getTree.ts
+
+// The MIT License (MIT)
+//
+// Copyright (c) 2015-2016 Rico Sta. Cruz and other contributors
+// Copyright (c) 2016-2026 Zoltan Kochan and other contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 import path from 'node:path';
 import {type PackageSnapshots, type ProjectSnapshot} from '@pnpm/lockfile.fs';
 import {type DepTypes} from '@pnpm/lockfile.detect-dep-types';
 import {type Finder, type Registries} from '@pnpm/types';
-import {type PackageNode} from './PackageNode.ts';
-import {getPkgInfo} from './getPkgInfo.ts';
-import {getTreeNodeChildId} from './getTreeNodeChildId.ts';
-import {DependenciesCache} from './DependenciesCache.ts';
-import {serializeTreeNodeId, type TreeNodeId} from './TreeNodeId.ts';
-import {type NodePackageVisitInfo, type NodePackageVisitor, toNodePackageVisitInfo} from './dependencyVisitor.ts';
 
-export interface GetTreeOpts {
-  maxDepth: number;
-  rewriteLinkVersionDir: string;
-  includeOptionalDependencies: boolean;
-  excludePeerDependencies?: boolean;
-  lockfileDir: string;
-  onlyProjects?: boolean;
-  search?: Finder;
-  skipped: Set<string>;
-  registries: Registries;
-  importers: Record<string, ProjectSnapshot>;
-  depTypes: DepTypes;
-  currentPackages: PackageSnapshots;
-  wantedPackages: PackageSnapshots;
-  virtualStoreDir?: string;
-  virtualStoreDirMaxLength: number;
-}
+import {type PackageNode} from '../pkgtree/PackageNode.ts';
+import {getPkgInfo} from '../pkgtree/getPkgInfo.ts';
+import {DependenciesCache} from '../pkgtree/DependenciesCache.ts';
+import {type TreeNodeId} from '../pkgtree/TreeNodeId.ts';
+import {Keypath} from '../pkgtree/Keypath.ts';
+import {getTreeNodeChildId} from '../pkgtree/getTreeNodeChildId.ts';
 
-export interface DependencyInfo {
-  dependencies: PackageNode[];
+import {PackageVisitInfo} from './PackageVisitInfo.ts';
+import {type PackageVisitor} from './PackageVisitor.ts';
 
-  circular?: true;
-
-  /**
-   * The number of edges along the longest path, including the parent node.
-   *
-   *   - `"unknown"` if traversal was limited by a max depth option, therefore
-   *      making the true height of a package undetermined.
-   *   - `0` if the dependencies array is empty.
-   *   - `1` if the dependencies array has at least 1 element and no child
-   *     dependencies.
-   */
-  height: number | 'unknown';
-}
-
-export async function visitTree(dependenciesCache: DependenciesCache, opts: GetTreeOpts, keypath: Keypath, parentId: TreeNodeId, parentInfo: NodePackageVisitInfo, visitor: NodePackageVisitor): Promise<DependencyInfo> {
+export async function visitPackageTree(opts: GetTreeOpts, keypath: Keypath, dependenciesCache: DependenciesCache, parentId: TreeNodeId, parentInfo: PackageVisitInfo, visitor: PackageVisitor): Promise<DependencyInfo> {
   if (opts.maxDepth <= 0) {
     return {dependencies: [], height: 'unknown'};
   }
@@ -130,9 +124,10 @@ export async function visitTree(dependenciesCache: DependenciesCache, opts: GetT
     });
     let circular: boolean;
     let newEntry: PackageNode | null = null;
-    const stepInto = opts.excludePeerDependencies && packageInfo.isPeer ? false : await visitor(parentInfo, toNodePackageVisitInfo(opts.lockfileDir, packageInfo));
-    const nodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: opts.importers});
+    const packageVisitInfo = new PackageVisitInfo(opts.lockfileDir, packageInfo);
+    const stepInto = opts.excludePeerDependencies && packageInfo.isPeer ? false : await visitor(parentInfo, packageVisitInfo);
     const childTreeMaxDepth = stepInto ? opts.maxDepth - 1 : -1;
+    const nodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: opts.importers});
     if (nodeId == null) {
       circular = false;
       newEntry = packageInfo;
@@ -143,7 +138,7 @@ export async function visitTree(dependenciesCache: DependenciesCache, opts: GetT
         dependencies = [];
       } else {
         const cacheEntry = dependenciesCache.get({parentId: nodeId, requestedDepth: childTreeMaxDepth});
-        const children = cacheEntry ?? await visitTree(dependenciesCache, {...opts, maxDepth: childTreeMaxDepth}, keypath.concat(nodeId), nodeId, packageInfo, visitor);
+        const children = cacheEntry ?? await visitPackageTree({...opts, maxDepth: childTreeMaxDepth}, keypath.concat(nodeId), dependenciesCache, nodeId, packageVisitInfo, visitor);
         if (cacheEntry == null && !children.circular) {
           if (children.height === 'unknown') {
             dependenciesCache.addPartiallyVisitedResult(nodeId, {dependencies: children.dependencies, depth: childTreeMaxDepth});
@@ -183,25 +178,37 @@ export async function visitTree(dependenciesCache: DependenciesCache, opts: GetT
   return result;
 }
 
-/**
- * Useful for detecting cycles.
- */
-export class Keypath {
-  keypath: string[];
+export interface GetTreeOpts {
+  maxDepth: number;
+  rewriteLinkVersionDir: string;
+  includeOptionalDependencies: boolean;
+  excludePeerDependencies?: boolean;
+  lockfileDir: string;
+  onlyProjects?: boolean;
+  search?: Finder;
+  skipped: Set<string>;
+  registries: Registries;
+  importers: Record<string, ProjectSnapshot>;
+  depTypes: DepTypes;
+  currentPackages: PackageSnapshots;
+  wantedPackages: PackageSnapshots;
+  virtualStoreDir?: string;
+  virtualStoreDirMaxLength: number;
+}
 
-  private constructor(keypath: string[]) {
-    this.keypath = keypath;
-  }
+export interface DependencyInfo {
+  dependencies: PackageNode[];
 
-  public static initialize(treeNodeId: TreeNodeId): Keypath {
-    return new Keypath([serializeTreeNodeId(treeNodeId)]);
-  }
+  circular?: true;
 
-  public includes(treeNodeId: TreeNodeId): boolean {
-    return this.keypath.includes(serializeTreeNodeId(treeNodeId));
-  }
-
-  public concat(treeNodeId: TreeNodeId): Keypath {
-    return new Keypath([...this.keypath, serializeTreeNodeId(treeNodeId)]);
-  }
+  /**
+   * The number of edges along the longest path, including the parent node.
+   *
+   *   - `"unknown"` if traversal was limited by a max depth option, therefore
+   *      making the true height of a package undetermined.
+   *   - `0` if the dependencies array is empty.
+   *   - `1` if the dependencies array has at least 1 element and no child
+   *     dependencies.
+   */
+  height: number | 'unknown';
 }

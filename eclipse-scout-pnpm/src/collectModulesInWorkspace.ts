@@ -11,7 +11,7 @@
 import path from 'node:path';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {findWorkspacePackages, type Project} from '@pnpm/workspace.find-packages';
-import {fileExists} from './fileExists.ts';
+import {fileExists} from './util/files.ts';
 
 /**
  * Gets the directory closest to the file-system root that contains a 'pnpm-workspace.yaml' file. The search starts at the given start dir stepping up the parent directories.

@@ -7,23 +7,50 @@
  *
  * SPDX-License-Identifier: EPL-2.0
  */
+
+// Inspired by https://github.com/pnpm/pnpm/blob/v10.26.1/reviewing/dependencies-hierarchy/src/buildDependenciesHierarchy.ts
+
+// The MIT License (MIT)
+//
+// Copyright (c) 2015-2016 Rico Sta. Cruz and other contributors
+// Copyright (c) 2016-2026 Zoltan Kochan and other contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 import path from 'node:path';
 import realpathMissing from 'realpath-missing';
-
 import {readModulesManifest} from '@pnpm/modules-yaml';
 import {normalizeRegistries} from '@pnpm/normalize-registries';
 import {getLockfileImporterId, type LockfileObject, readCurrentLockfile, readWantedLockfile} from '@pnpm/lockfile.fs';
 import {type DepTypes, detectDepTypes} from '@pnpm/lockfile.detect-dep-types';
-import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {DEPENDENCIES_FIELDS, type DependenciesField, type Registries} from '@pnpm/types';
-import {type GetTreeOpts, Keypath, visitTree} from './getTree.ts';
-import {type TreeNodeId} from './TreeNodeId.ts';
-import {DependenciesCache} from './DependenciesCache.ts';
-import {getTreeNodeChildId} from './getTreeNodeChildId.ts';
-import {getPkgInfo} from './getPkgInfo.ts';
 
-export async function visitDependenciesForPackages(lockfileDir: string, packages: string[], visitor: NodePackageVisitor) {
+import {type TreeNodeId} from '../pkgtree/TreeNodeId.ts';
+import {getPkgInfo} from '../pkgtree/getPkgInfo.ts';
+import {Keypath} from '../pkgtree/Keypath.ts';
+import {getTreeNodeChildId} from '../pkgtree/getTreeNodeChildId.ts';
+import {DependenciesCache} from '../pkgtree/DependenciesCache.ts';
+import {type GetTreeOpts, visitPackageTree} from './visitPackageTree.ts';
+import {PackageVisitInfo} from './PackageVisitInfo.ts';
+
+export async function visitDependenciesForPackages(lockfileDir: string, packages: string[], visitor: PackageVisitor): Promise<void> {
   const modulesDir = await realpathMissing(path.join(lockfileDir, 'node_modules'));
   const modules = await readModulesManifest(modulesDir);
   const registries = normalizeRegistries({...modules?.registries});
@@ -32,7 +59,7 @@ export async function visitDependenciesForPackages(lockfileDir: string, packages
   const wantedLockfile = await readWantedLockfile(lockfileDir, {ignoreIncompatible: false});
   const depTypes = detectDepTypes(currentLockfile);
   const dependenciesCache = new DependenciesCache();
-  const opts = {
+  const opts: PackageVisitOptions = {
     depth: Infinity,
     excludePeerDependencies: true,
     include: {dependencies: true, devDependencies: true, optionalDependencies: true},
@@ -48,12 +75,12 @@ export async function visitDependenciesForPackages(lockfileDir: string, packages
 }
 
 async function visitDependenciesForPackage(packagePath: string, currentLockfile: LockfileObject, wantedLockfile: LockfileObject, depTypes: DepTypes, cache: DependenciesCache,
-  visitor: NodePackageVisitor, opts: PackageVisitOptions): Promise<void> {
+  visitor: PackageVisitor, opts: PackageVisitOptions): Promise<void> {
   const importerId = getLockfileImporterId(opts.lockfileDir, path.resolve(opts.lockfileDir, packagePath));
   const parentId: TreeNodeId = {type: 'importer', importerId};
-  const rootInfo = toNodePackageVisitInfo(opts.lockfileDir, await readPackageJson(opts.lockfileDir, packagePath));
+  const rootInfo = await PackageVisitInfo.fromPackageJson(opts.lockfileDir, packagePath);
   for (const dependenciesField of DEPENDENCIES_FIELDS.sort().filter(dependenciesField => opts.include[dependenciesField])) {
-    let importer = currentLockfile.importers[importerId];
+    const importer = currentLockfile.importers[importerId];
     if (!importer) {
       throw new Error(`Module of pnpm-workspace not found: '${importerId}'. Ensure the module is listed in each ${WORKSPACE_MANIFEST_FILENAME} and try again.`);
     }
@@ -73,8 +100,8 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
         virtualStoreDir: opts.virtualStoreDir,
         virtualStoreDirMaxLength: opts.virtualStoreDirMaxLength
       });
-      const depNodePackageVisitInfo = toNodePackageVisitInfo(opts.lockfileDir, packageInfo);
-      const stepInto = await visitor(rootInfo, depNodePackageVisitInfo);
+      const packageVisitInfo = new PackageVisitInfo(opts.lockfileDir, packageInfo);
+      const stepInto = await visitor(rootInfo, packageVisitInfo);
       if (stepInto) {
         const childNodeId = getTreeNodeChildId({parentId, dep: {alias, ref}, lockfileDir: opts.lockfileDir, importers: currentLockfile.importers});
         const visitOptions: GetTreeOpts = {
@@ -93,40 +120,13 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
           virtualStoreDir: opts.virtualStoreDir,
           virtualStoreDirMaxLength: opts.virtualStoreDirMaxLength
         };
-        await visitTree(cache, visitOptions, Keypath.initialize(childNodeId), childNodeId, depNodePackageVisitInfo, visitor);
+        await visitPackageTree(visitOptions, Keypath.initialize(childNodeId), cache, childNodeId, packageVisitInfo, visitor);
       }
     }
   }
 }
 
-async function readPackageJson(workspaceRoot: string, packagePath: string): Promise<NodePackageVisitInfo> {
-  const dir = path.join(workspaceRoot, packagePath);
-  const content = await readPackageJsonFromDir(dir);
-  return {name: content.name, version: content.version, path: dir};
-}
-
-export function toNodePackageVisitInfo(lockfileDir: string, packageInfo: { name: string; version: string; path: string }): NodePackageVisitInfo {
-  const packagePath = path.isAbsolute(packageInfo.path) ? packageInfo.path : path.resolve(lockfileDir, packageInfo.path);
-  if (!packageInfo?.name || !packageInfo?.version) {
-    throw new Error(`'name' and 'version' attributes are missing in '${packagePath}'.`);
-  }
-  return {
-    name: packageInfo.name,
-    version: packageInfo.version,
-    path: packagePath
-  };
-}
-
-export type NodePackageVisitInfo = {
-  name: string;
-  version: string;
-  /**
-   * absolute path
-   */
-  path: string;
-};
-
-export type NodePackageVisitor = (parent: NodePackageVisitInfo, dep: NodePackageVisitInfo) => Promise<boolean>;
+export type PackageVisitor = (parent: PackageVisitInfo, dep: PackageVisitInfo) => Promise<boolean>;
 
 type PackageVisitOptions = {
   depth: number;

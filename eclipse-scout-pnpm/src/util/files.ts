@@ -7,12 +7,14 @@
  *
  * SPDX-License-Identifier: EPL-2.0
  */
+
 import {promises as fs} from 'node:fs';
 import {join, resolve} from 'node:path';
 
 export type ListFilesOptions = {
   /** Folder names to exclude – if omitted all folders are traversed */
   folderExcludes?: string[];
+
   /** Maximum recursion depth (0 = only root). Omit for unlimited */
   maxDepth?: number;
 };
@@ -51,4 +53,8 @@ export async function listFiles(root: string, fileName: string, opts: ListFilesO
 
   await walk(start, 0);
   return results;
+}
+
+export async function fileExists(path: string): Promise<boolean> {
+  return await fs.access(path, fs.constants.R_OK).then(() => true).catch(() => false);
 }

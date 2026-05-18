@@ -12,7 +12,7 @@ import {test, type TestContext} from 'node:test';
 import assert from 'node:assert';
 import path from 'node:path';
 
-import {pnpmInstall} from '../src/install.ts';
+import {pnpmInstall} from '../src/pnpmInstall.ts';
 
 test('install required', async (t: TestContext) => {
   const pnpmWorkspaceRoot = path.resolve(process.cwd(), '../..');

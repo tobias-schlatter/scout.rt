@@ -8,6 +8,31 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
+// Inspired by https://github.com/pnpm/pnpm/blob/v10.26.1/reviewing/dependencies-hierarchy/src/DependenciesCache.ts
+
+// The MIT License (MIT)
+//
+// Copyright (c) 2015-2016 Rico Sta. Cruz and other contributors
+// Copyright (c) 2016-2026 Zoltan Kochan and other contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 import {type PackageNode} from './PackageNode.ts';
 import {serializeTreeNodeId, type TreeNodeId} from './TreeNodeId.ts';
 
@@ -66,7 +91,7 @@ export interface CacheHit {
  *     depth constraint is and whether it's acceptable to exceed the max depth.
  *     This cache assumes the max depth should not be exceeded.
  *   - Cycles may or may not be cached. It depends on whether the cycle is
- *     introduced by a package outside of the cached tree.
+ *     introduced by a package outside the cached tree.
  *
  * This cache adds an optimization when a dependency tree has been fully
  * enumerated and wasn't limited by a max depth argument. In that case,
