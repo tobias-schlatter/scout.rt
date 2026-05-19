@@ -19,7 +19,7 @@ export class OverridesComputer {
 
   lockfileDir: string;
   yaml: PnpmWorkspaceYaml;
-  depUsageByVersion: Map<string /* dep-name */, Map<string /* dep-version */, Map<string /* parent PackageVisitInfo.id() */, DependencyOwner>>>;
+  depUsageByVersion: Map<string /* dep alias */, Map<string /* dep version */, Map<string /* parent PackageVisitInfo.id() */, DependencyOwner>>>;
   depCache: DependencyCache;
 
   constructor(lockfileDir: string, yaml: PnpmWorkspaceYaml) {
@@ -43,43 +43,42 @@ export class OverridesComputer {
         return false; // skip subtree if package is part of pnpm-workspace as it will be visited anyway later on
       }
     }
-    const newDependency = !this.depUsageByVersion.get(dependency.name)?.has(dependency.version);
-    await this._registerDependencyUsage(parent, dependency);
-    return newDependency;
+    return await this._registerDependencyUsage(parent, dependency);
   }
 
-  async _registerDependencyUsage(parent: PackageVisitInfo, dep: PackageVisitInfo) {
-    const name = dep.name;
-    let existing = this.depUsageByVersion.get(name);
+  async _registerDependencyUsage(parent: PackageVisitInfo, dep: PackageVisitInfo): Promise<boolean> {
+    let existing = this.depUsageByVersion.get(dep.alias);
+    let isNewDependency = false;
     if (!existing) {
       existing = new Map();
-      this.depUsageByVersion.set(name, existing);
+      this.depUsageByVersion.set(dep.alias, existing);
     }
-    let currentVersionUsage = existing.get(dep.version);
+    const {version, fix} = await this.depCache.resolveVersionInfo(parent.path, dep.alias, dep.version);
+    let currentVersionUsage = existing.get(version);
     if (!currentVersionUsage) {
       currentVersionUsage = new Map();
-      existing.set(dep.version, currentVersionUsage);
+      existing.set(version, currentVersionUsage);
+      isNewDependency = true;
     }
     const owner = parent.id();
-    const fix = await this.depCache.isFixedDependency(parent.path, name);
     currentVersionUsage.set(owner, {parent, fix});
+    return isNewDependency;
   }
 
   _buildOverrides(): Record<string, string> {
     const result = new Map<string, string>();
-    const allFixed = (usages: Map<string, DependencyOwner>) => [...usages.values()].every(owner => owner.fix);
+    const allFixed = (usages: Map<string, DependencyOwner>) => [...usages.values()]
+      .every(owner => owner.fix);
 
-    for (const [depName, versions] of this.depUsageByVersion.entries()) {
-      // sort versions by usage count (highest usage first)
-      const versionSorted = [...versions.entries()]
-        .sort(([k, v], [s, t]) => t.size - v.size);
+    for (const [depAlias, versions] of this.depUsageByVersion.entries()) {
+      const versionSorted = this._getDependencyVersionsSorted(versions);
 
       // most used version of a dependency: use override without parent
       const mostOftenUsed = versionSorted[0];
       const [version, usages] = mostOftenUsed;
       let allowSkipFixed = true;
       if (this._isOverrideVersionAllowed(version) && !allFixed(usages)) {
-        result.set(depName, version);
+        result.set(depAlias, version);
         allowSkipFixed = false;
       }
 
@@ -88,7 +87,7 @@ export class OverridesComputer {
         const [version, usages] = versionSorted[i];
         if (this._isOverrideVersionAllowed(version)) {
           for (const owner of usages.values()) {
-            this._addOverride(owner, depName, version, result, allowSkipFixed);
+            this._addOverride(owner, depAlias, version, result, allowSkipFixed);
           }
         }
       }
@@ -98,17 +97,31 @@ export class OverridesComputer {
       .sort(([k, v], [s, t]) => k.localeCompare(s)));
   }
 
+  /**
+   * sort versions by usage count (highest usage first)
+   */
+  _getDependencyVersionsSorted(versions: Map<string, Map<string, DependencyOwner>>): [string, Map<string, DependencyOwner>][] {
+    return [...versions.entries()]
+      .sort(([k, v], [s, t]) => {
+        const sizeDiff = t.size - v.size;
+        if (sizeDiff) {
+          return sizeDiff;
+        }
+        return k.localeCompare(s); // ensure stable sort in case of same size (prevents flip-flop changes).
+      });
+  }
+
   _isOverrideVersionAllowed(version: string): boolean {
     return !version.startsWith('link:') && !SNAPSHOT_REGEX.test(version);
   }
 
-  _addOverride(owner: DependencyOwner, depName: string, depVersion: string, overrides: Map<string, string>, allowSkipFixed: boolean): void {
+  _addOverride(owner: DependencyOwner, depAlias: string, depVersion: string, overrides: Map<string, string>, allowSkipFixed: boolean): void {
     if (allowSkipFixed && owner.fix) {
       return;
     }
-    const addParentVersion = this.depUsageByVersion.get(owner.parent.name)?.size > 1 && this._isOverrideVersionAllowed(owner.parent.version);
+    const addParentVersion = this.depUsageByVersion.get(owner.parent.alias)?.size > 1 && this._isOverrideVersionAllowed(owner.parent.version);
     const parentPart = owner.parent.name + (addParentVersion ? `@${owner.parent.version}` : '');
-    const key = `${parentPart}>${depName}`;
+    const key = `${parentPart}>${depAlias}`;
     overrides.set(key, depVersion);
   }
 
@@ -119,7 +132,7 @@ export class OverridesComputer {
     logConverge = logConverge || 'own';
 
     const isOutsideWorkspace = (v: Map<string, DependencyOwner>) => [...v.values()].some(o => o.parent.path.indexOf('.pnpm') >= 0);
-    for (const [dependencyName, versionsMap] of this.depUsageByVersion.entries()) {
+    for (const [depAlias, versionsMap] of this.depUsageByVersion.entries()) {
       if (versionsMap.size <= 1) {
         continue;
       }
@@ -129,7 +142,7 @@ export class OverridesComputer {
         const versionUsages = [...versionsMap.entries()]
           .map(([k, v]) => `${k}: [\n  ${[...v].sort().join(',\n  ')}\n]`)
           .join('\n');
-        console.warn(`Dependency '${dependencyName}' does not converge:\n${versionUsages}\n`);
+        console.warn(`Dependency '${depAlias}' does not converge:\n${versionUsages}\n`);
       }
     }
   }

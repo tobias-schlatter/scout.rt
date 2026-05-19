@@ -8,7 +8,6 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
-
 import {fork} from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
@@ -38,6 +37,11 @@ export async function pnpmCjs(): Promise<string> {
     '../../lib/node_modules/pnpm/bin/pnpm.cjs', // e.g. Linux
     '../node_modules/pnpm/bin/pnpm.cjs' // e.g. Windows
   ];
-  const pnpmCjs = pathCandidates.find(fileExists);
-  return path.resolve(process.execPath, pnpmCjs);
+  for (const candidate of pathCandidates) {
+    const abs = path.resolve(process.execPath, candidate);
+    if (await fileExists(abs)) {
+      return abs;
+    }
+  }
+  throw new Error(`Cannot find 'pnpm.cjs' in node installation '${process.execPath}'.`);
 }

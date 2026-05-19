@@ -13,18 +13,20 @@ import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 
 export class PackageVisitInfo {
   name: string;
+  alias: string;
   version: string;
   /**
    * absolute path to package
    */
   path: string;
 
-  constructor(lockfileDir: string, model: { name: string; version: string; path: string }) {
+  constructor(lockfileDir: string, model: { name: string; alias: string; version: string; path: string }) {
     this.path = path.isAbsolute(model.path) ? model.path : path.resolve(lockfileDir, model.path);
     if (!model?.name || !model?.version) {
       throw new Error(`'name' or 'version' attribute missing in '${this.path}'.`);
     }
     this.name = model.name;
+    this.alias = model.alias;
     this.version = model.version;
   }
 
@@ -35,6 +37,6 @@ export class PackageVisitInfo {
   static async fromPackageJson(lockfileDir: string, packagePath: string): Promise<PackageVisitInfo> {
     const dir = path.join(lockfileDir, packagePath);
     const content = await readPackageJsonFromDir(dir);
-    return new PackageVisitInfo(lockfileDir, {name: content.name, version: content.version, path: dir});
+    return new PackageVisitInfo(lockfileDir, {name: content.name, alias: content.name, version: content.version, path: dir});
   }
 }

@@ -16,6 +16,6 @@ import {pnpmInstall} from '../src/pnpmInstall.ts';
 
 test('install required', async (t: TestContext) => {
   const pnpmWorkspaceRoot = path.resolve(process.cwd(), '../..');
-  await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'all'});
+  await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'single-external'});
   assert.strictEqual(1, 1);
 });

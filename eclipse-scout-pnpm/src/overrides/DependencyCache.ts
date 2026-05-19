@@ -11,6 +11,7 @@ import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 import {fileExists} from '../util/files.ts';
 
 const FIX_SEMVER_VERSION = /^=?\d+\.\d+\.\d+(-.*)?$/;
+const NPM_ALIAS_PREFIX = 'npm:';
 
 export class DependencyCache {
 
@@ -20,10 +21,34 @@ export class DependencyCache {
     this.cache = new Map();
   }
 
-  async isFixedDependency(pkgJsonPath: string, depName: string): Promise<boolean> {
+  async resolveVersionInfo(pkgJsonPath: string, depName: string, depVersion: string): Promise<{ version: string; fix: boolean }> {
     const deps = await this.getDeclaredDependencies(pkgJsonPath);
-    const dependencyVersionSpecifier = deps?.[depName];
-    return FIX_SEMVER_VERSION.test(dependencyVersionSpecifier);
+    const specifier = deps?.[depName];
+    const {name, version} = this._splitNpmAliasSpecifier(specifier);
+    const fix = FIX_SEMVER_VERSION.test(version);
+    if (name) {
+      return {
+        version: NPM_ALIAS_PREFIX + name + '@' + depVersion,
+        fix
+      };
+    }
+    return {version: depVersion, fix};
+  }
+
+  _splitNpmAliasSpecifier(specifier: string): { name: string; version: string } {
+    if (!specifier?.startsWith(NPM_ALIAS_PREFIX)) {
+      return {name: null, version: specifier};
+    }
+    specifier = specifier.substring(NPM_ALIAS_PREFIX.length);
+
+    const namespaceMarker = '@';
+    const hasNamespaceMaker = specifier.startsWith(namespaceMarker);
+    const withoutNamespaceMarker = hasNamespaceMaker ? specifier.substring(namespaceMarker.length) : specifier;
+    const versionDelimPos = withoutNamespaceMarker.lastIndexOf('@');
+    const hasVersion = versionDelimPos > 0;
+    const name = (hasNamespaceMaker ? namespaceMarker : '') + (hasVersion ? withoutNamespaceMarker.substring(0, versionDelimPos) : withoutNamespaceMarker);
+    const version = hasVersion ? withoutNamespaceMarker.substring(versionDelimPos + 1) : null;
+    return {name, version};
   }
 
   async getDeclaredDependencies(pkgJsonPath: string): Promise<Record<string, string>> {
@@ -42,25 +67,6 @@ export class DependencyCache {
       return null;
     }
 
-    const allDeps = {...pckJson.peerDependencies, ...pckJson.optionalDependencies, ...pckJson.devDependencies, ...pckJson.dependencies};
-    // resolve npm alias dependencies
-    const npmAliasPrefix = 'npm:';
-    for (const [key, value] of Object.entries(allDeps)) {
-      if (value.startsWith(npmAliasPrefix)) {
-        const {name, version} = this._resolveNpmAlias(value, npmAliasPrefix);
-        delete allDeps[key];
-        allDeps[name] = version;
-      }
-    }
-    return allDeps;
-  }
-
-  _resolveNpmAlias(specifier: string, npmAliasPrefix: string): { name: string; version: string } {
-    const bareSpecifier = specifier.substring(npmAliasPrefix.length);
-    const delimPos = bareSpecifier.lastIndexOf('@');
-    const hasVersion = delimPos > 0;
-    const name = hasVersion ? bareSpecifier.substring(0, delimPos) : bareSpecifier;
-    const version = hasVersion ? bareSpecifier.substring(delimPos + 1) : '*';
-    return {name, version};
+    return {...pckJson.peerDependencies, ...pckJson.optionalDependencies, ...pckJson.devDependencies, ...pckJson.dependencies};
   }
 }
