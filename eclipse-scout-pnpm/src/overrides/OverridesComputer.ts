@@ -119,7 +119,7 @@ export class OverridesComputer {
     if (allowSkipFixed && owner.fix) {
       return;
     }
-    const addParentVersion = this.depUsageByVersion.get(owner.parent.alias)?.size > 1 && this._isOverrideVersionAllowed(owner.parent.version);
+    const addParentVersion = this.depUsageByVersion.get(owner.parent.name)?.size > 1 && this._isOverrideVersionAllowed(owner.parent.version);
     const parentPart = owner.parent.name + (addParentVersion ? `@${owner.parent.version}` : '');
     const key = `${parentPart}>${depAlias}`;
     overrides.set(key, depVersion);

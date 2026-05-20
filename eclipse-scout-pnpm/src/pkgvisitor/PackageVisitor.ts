@@ -61,7 +61,6 @@ export async function visitDependenciesForPackages(lockfileDir: string, packages
   const dependenciesCache = new DependenciesCache();
   const opts: PackageVisitOptions = {
     depth: Infinity,
-    excludePeerDependencies: true,
     include: {dependencies: true, devDependencies: true, optionalDependencies: true},
     registries,
     onlyProjects: false,
