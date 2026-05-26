@@ -9,6 +9,6 @@
  */
 
 import {collectModulesInWorkspace} from './collectModulesInWorkspace.ts';
-import {pnpmInstall} from './pnpmInstall.ts';
+import {scoutInstall} from './scoutInstall.ts';
 
-export {collectModulesInWorkspace, pnpmInstall};
+export {collectModulesInWorkspace, scoutInstall};

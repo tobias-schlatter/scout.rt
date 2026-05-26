@@ -9,138 +9,208 @@
  */
 import path from 'node:path';
 import {visitDependenciesForPackages} from '../pkgvisitor/PackageVisitor.ts';
-import {PnpmWorkspaceYaml} from '../util/PnpmWorkspaceYaml.ts';
-import {PackageVisitInfo} from '../pkgvisitor/PackageVisitInfo.ts';
+import {type PnpmWorkspaceYaml} from '../util/PnpmWorkspaceYaml.ts';
+import {type PackageVisitInfo} from '../pkgvisitor/PackageVisitInfo.ts';
 import {DependencyCache} from './DependencyCache.ts';
 
+/**
+ * Regex to decide whether a version is a snapshot version (e.g. `1.2.3-snapshot` or `1.2.3-snapshot.19700101000000`)
+ */
 const SNAPSHOT_REGEX = /-snapshot|-snapshot\.\d{14}$/i;
 
+/**
+ * This class may be used to compute overrides for a given `pnpm-workspace.yaml`.
+ */
 export class OverridesComputer {
 
+  /**
+   * Directory of the `pnpm-lock.yaml`.
+   */
   lockfileDir: string;
-  yaml: PnpmWorkspaceYaml;
-  depUsageByVersion: Map<string /* dep alias */, Map<string /* dep version */, Map<string /* parent PackageVisitInfo.id() */, DependencyOwner>>>;
-  depCache: DependencyCache;
+  /**
+   * Parsed `pnpm-workspace.yaml`.
+   */
+  pnpmWorkspaceYaml: PnpmWorkspaceYaml;
 
-  constructor(lockfileDir: string, yaml: PnpmWorkspaceYaml) {
+  protected _depUsageByVersion = new Map<string /* dep alias */, Map<string /* dep version */, Map<string /* parent PackageVisitInfo.id() */, DependencyUsage>>>();
+  protected _depCache = new DependencyCache();
+
+  constructor(lockfileDir: string, pnpmWorkspaceYaml: PnpmWorkspaceYaml) {
     this.lockfileDir = lockfileDir;
-    this.yaml = yaml;
-    this.depUsageByVersion = new Map();
-    this.depCache = new DependencyCache();
+    this.pnpmWorkspaceYaml = pnpmWorkspaceYaml;
   }
 
+  /**
+   * Computes overrides from all packages in {@link pnpmWorkspaceYaml}.
+   */
   async computeOverrides(logConverge?: ConvergeLogLevel): Promise<Record<string, string>> {
-    const packages = this.yaml.getPackages().map(p => path.relative(this.lockfileDir, p));
-    await visitDependenciesForPackages(this.lockfileDir, packages, this._collect.bind(this, packages));
+    // get all workspace packages
+    const workspacePackages = this.pnpmWorkspaceYaml.getPackages().map(p => path.relative(this.lockfileDir, p));
+
+    // visit all workspace packages and collect all non workspace dependencies
+    await visitDependenciesForPackages(
+      this.lockfileDir,
+      workspacePackages,
+      async (owner: PackageVisitInfo, dependency: PackageVisitInfo) => {
+        // skip subtree if package is part of pnpm-workspace.yaml as it will be visited anyway later on
+        if (dependency.version.startsWith('link:')) {
+          const isInOwnWorkspace = workspacePackages.some(wsp => dependency.path.endsWith(wsp));
+          if (isInOwnWorkspace) {
+            return false;
+          }
+        }
+
+        // not a linked workspace dependency -> register usage
+        return await this._registerDependencyUsage(owner, dependency);
+      }
+    );
+
+    // log non unique packages
     this._logNonUniqueWorkspaceVersions(logConverge);
+
+    // build overrides
     return this._buildOverrides();
   }
 
-  async _collect(workspacePackages: string[], parent: PackageVisitInfo, dependency: PackageVisitInfo): Promise<boolean> {
-    if (dependency.version.startsWith('link:')) {
-      const isInOwnWorkspace = workspacePackages.some(wsp => dependency.path.endsWith(wsp));
-      if (isInOwnWorkspace) {
-        return false; // skip subtree if package is part of pnpm-workspace as it will be visited anyway later on
-      }
+  /**
+   * Registers a dependency usage for the given parent.
+   * Returns `true` if the dependency was not registered already.
+   */
+  protected async _registerDependencyUsage(owner: PackageVisitInfo, dependency: PackageVisitInfo): Promise<boolean> {
+    // ensure version usages for dependency
+    let usagesByVersion = this._depUsageByVersion.get(dependency.alias);
+    if (!usagesByVersion) {
+      usagesByVersion = new Map();
+      this._depUsageByVersion.set(dependency.alias, usagesByVersion);
     }
-    return await this._registerDependencyUsage(parent, dependency);
-  }
 
-  async _registerDependencyUsage(parent: PackageVisitInfo, dep: PackageVisitInfo): Promise<boolean> {
-    let existing = this.depUsageByVersion.get(dep.alias);
+    // resolve version info
+    const {version, fix} = await this._depCache.resolveVersionInfo(owner.path, dependency.alias, dependency.version);
+
+    // flag whether the dependency was already registered
     let isNewDependency = false;
-    if (!existing) {
-      existing = new Map();
-      this.depUsageByVersion.set(dep.alias, existing);
-    }
-    const {version, fix} = await this.depCache.resolveVersionInfo(parent.path, dep.alias, dep.version);
-    let currentVersionUsage = existing.get(version);
-    if (!currentVersionUsage) {
-      currentVersionUsage = new Map();
-      existing.set(version, currentVersionUsage);
+
+    // ensure usages for resolved version
+    let usages = usagesByVersion.get(version);
+    if (!usages) {
+      usages = new Map();
+      usagesByVersion.set(version, usages);
       isNewDependency = true;
     }
-    const owner = parent.id();
-    currentVersionUsage.set(owner, {parent, fix});
+
+    // register owner as usage
+    usages.set(owner.id, {owner, fix});
+
     return isNewDependency;
   }
 
-  _buildOverrides(): Record<string, string> {
+  /**
+   * Builds overrides from {@link _depUsageByVersion}.
+   */
+  protected _buildOverrides(): Record<string, string> {
     const result = new Map<string, string>();
-    const allFixed = (usages: Map<string, DependencyOwner>) => [...usages.values()]
-      .every(owner => owner.fix);
 
-    for (const [depAlias, versions] of this.depUsageByVersion.entries()) {
-      const versionSorted = this._getDependencyVersionsSorted(versions);
+    // checks whether all usages are fixed usages
+    const allFixed = (usages: Map<string, DependencyUsage>) => [...usages.values()]
+      .every(usage => usage.fix);
 
-      // most used version of a dependency: use override without parent
-      const mostOftenUsed = versionSorted[0];
-      const [version, usages] = mostOftenUsed;
+    for (const [depAlias, versions] of this._depUsageByVersion.entries()) {
+      const versionsSorted = this._getDependencyVersionsSorted(versions);
+
+      // most used version of a dependency -> use override without parent
+      const [mostUsedVersion, mostUsedUsages] = versionsSorted[0];
       let allowSkipFixed = true;
-      if (this._isOverrideVersionAllowed(version) && !allFixed(usages)) {
-        result.set(depAlias, version);
+      // add version without parent if possible
+      if (this._isOverrideVersionAllowed(mostUsedVersion) && !allFixed(mostUsedUsages)) {
+        result.set(depAlias, mostUsedVersion);
+        // even fixed version need to be added to overrides, as otherwise they are overridden by the recently added override without a parent
         allowSkipFixed = false;
       }
 
-      // less used versions: use override with parent
-      for (let i = 1; i < versionSorted.length; i++) {
-        const [version, usages] = versionSorted[i];
+      // less used versions -> use override with parent
+      for (let i = 1; i < versionsSorted.length; i++) {
+        const [version, usages] = versionsSorted[i];
+        // add overrides for all versions and owners
         if (this._isOverrideVersionAllowed(version)) {
-          for (const owner of usages.values()) {
-            this._addOverride(owner, depAlias, version, result, allowSkipFixed);
+          for (const usage of usages.values()) {
+            this._addOverride(result, depAlias, version, usage, allowSkipFixed);
           }
         }
       }
     }
 
-    return Object.fromEntries([...result]
-      .sort(([k, v], [s, t]) => k.localeCompare(s)));
+    // sort alphabetically by alias
+    return Object.fromEntries([...result].sort(([alias1, version1], [alias2, version2]) => alias1.localeCompare(alias2)));
   }
 
   /**
-   * sort versions by usage count (highest usage first)
+   * Sort versions by usage count (from high to low).
    */
-  _getDependencyVersionsSorted(versions: Map<string, Map<string, DependencyOwner>>): [string, Map<string, DependencyOwner>][] {
+  protected _getDependencyVersionsSorted(versions: Map<string, Map<string, DependencyUsage>>): [string, Map<string, DependencyUsage>][] {
     return [...versions.entries()]
-      .sort(([k, v], [s, t]) => {
-        const sizeDiff = t.size - v.size;
+      .sort(([version1, usages1], [version2, usages2]) => {
+        // compare usage count
+        const sizeDiff = usages2.size - usages1.size;
         if (sizeDiff) {
           return sizeDiff;
         }
-        return k.localeCompare(s); // ensure stable sort in case of same size (prevents flip-flop changes).
+
+        // ensure stable sort in case of same size (prevents flip-flop changes)
+        return version1.localeCompare(version2);
       });
   }
 
-  _isOverrideVersionAllowed(version: string): boolean {
+  /**
+   * Checks whether an override is allowed for the given version.
+   * It is allowed if the version is not a link (i.e. starts with 'link:') and not a snapshot version.
+   */
+  protected _isOverrideVersionAllowed(version: string): boolean {
     return !version.startsWith('link:') && !SNAPSHOT_REGEX.test(version);
   }
 
-  _addOverride(owner: DependencyOwner, depAlias: string, depVersion: string, overrides: Map<string, string>, allowSkipFixed: boolean): void {
-    if (allowSkipFixed && owner.fix) {
+  /**
+   * Adds an override for the given alias and version to the given {@link Map}.
+   * Skips fix versions if skip is allowed.
+   */
+  protected _addOverride(overrides: Map<string, string>, depAlias: string, depVersion: string, usage: DependencyUsage, allowSkipFixed: boolean) {
+    // nothing to fix and skip allowed
+    if (usage.fix && allowSkipFixed) {
       return;
     }
-    const addParentVersion = this.depUsageByVersion.get(owner.parent.name)?.size > 1 && this._isOverrideVersionAllowed(owner.parent.version);
-    const parentPart = owner.parent.name + (addParentVersion ? `@${owner.parent.version}` : '');
-    const key = `${parentPart}>${depAlias}`;
-    overrides.set(key, depVersion);
+    // check whether the parent occurs in multiple versions and its version needs to be included
+    const addParentVersion = this._depUsageByVersion.get(usage.owner.name)?.size > 1 && this._isOverrideVersionAllowed(usage.owner.version);
+    const parentPart = usage.owner.name + (addParentVersion ? `@${usage.owner.version}` : '');
+
+    // add override
+    overrides.set(`${parentPart}>${depAlias}`, depVersion);
   }
 
-  _logNonUniqueWorkspaceVersions(logConverge: ConvergeLogLevel) {
-    if (logConverge === 'none') {
+  /**
+   * Logs non unique packages (see {@link ConvergeLogLevel}).
+   */
+  protected _logNonUniqueWorkspaceVersions(logConverge: ConvergeLogLevel) {
+    // nothing to log
+    if (logConverge === convergeLogLevel.NONE) {
       return;
     }
-    logConverge = logConverge || 'own';
+    logConverge = logConverge || convergeLogLevel.OWN;
 
-    const isOutsideWorkspace = (v: Map<string, DependencyOwner>) => [...v.values()].some(o => o.parent.path.indexOf('.pnpm') >= 0);
-    for (const [depAlias, versionsMap] of this.depUsageByVersion.entries()) {
+    // check if at least one usage comes from an external package
+    const isOutsideWorkspace = (usages: Map<string, DependencyUsage>) => [...usages.values()].some(usage => usage.owner.path.indexOf('.pnpm') >= 0);
+
+    for (const [depAlias, versionsMap] of this._depUsageByVersion.entries()) {
+      // version occurs only once -> nothing to log
       if (versionsMap.size <= 1) {
         continue;
       }
 
-      const versionsFromExternals = [...versionsMap.values()].filter(isOutsideWorkspace).length;
-      if (versionsFromExternals === 0 || logConverge === 'all' || (logConverge === 'single-external' && versionsFromExternals === 1)) {
+      // count versions from externals
+      const versionsFromExternalsCount = [...versionsMap.values()].filter(isOutsideWorkspace).length;
+
+      // log warning depending on requested convergence
+      if (logConverge === convergeLogLevel.ALL || (logConverge === convergeLogLevel.SINGLE_EXTERNAL && versionsFromExternalsCount === 1) || versionsFromExternalsCount === 0) {
         const versionUsages = [...versionsMap.entries()]
-          .map(([k, v]) => `${k}: [\n  ${[...v].sort().join(',\n  ')}\n]`)
+          .map(([version, usages]) => `${version}: [\n  ${[...usages.keys()].sort().join(',\n  ')}\n]`)
           .join('\n');
         console.warn(`Dependency '${depAlias}' does not converge:\n${versionUsages}\n`);
       }
@@ -148,5 +218,22 @@ export class OverridesComputer {
   }
 }
 
-type DependencyOwner = { parent?: PackageVisitInfo; fix: boolean };
-export type ConvergeLogLevel = 'all' | 'single-external' | 'own' | 'none';
+export type DependencyUsage = { owner?: PackageVisitInfo; fix: boolean };
+
+/**
+ * @see convergeLogLevel
+ */
+export type ConvergeLogLevel = typeof convergeLogLevel[keyof typeof convergeLogLevel];
+/**
+ * Determines whether convergence information is logged for dependencies...
+ * - `all`: ...of all packages
+ * - `single-external`: ...where exactly one of the different versions comes from an external package
+ * - `own`: ...where all different versions come from own packages
+ * - `none`: ...of no package
+ */
+export const convergeLogLevel = {
+  ALL: 'all',
+  SINGLE_EXTERNAL: 'single-external',
+  OWN: 'own',
+  NONE: 'none'
+} as const;

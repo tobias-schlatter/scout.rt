@@ -34,19 +34,23 @@ export async function listFiles(root: string, fileName: string, opts: ListFilesO
   const exclusions = opts.folderExcludes ? new Set(opts.folderExcludes) : null;
 
   async function walk(dir: string, depth: number): Promise<void> {
+    // return if max depth is reached
     if (depth > maxDepth) {
       return;
     }
 
     const entries = await fs.readdir(dir, {withFileTypes: true});
     for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
+      // build absolute path to current entry
+      const absolutePath = join(dir, entry.name);
       if (entry.isDirectory()) {
+        // step into non excluded directories
         if (!exclusions || !exclusions.has(entry.name)) {
-          await walk(fullPath, depth + 1);
+          await walk(absolutePath, depth + 1);
         }
       } else if (entry.isFile() && entry.name === fileName) {
-        results.push(fullPath);
+        // collect absolute path of matching files
+        results.push(absolutePath);
       }
     }
   }
@@ -55,6 +59,9 @@ export async function listFiles(root: string, fileName: string, opts: ListFilesO
   return results;
 }
 
+/**
+ * Checks whether a file exists for the given path.
+ */
 export async function fileExists(path: string): Promise<boolean> {
   return await fs.access(path, fs.constants.R_OK).then(() => true).catch(() => false);
 }

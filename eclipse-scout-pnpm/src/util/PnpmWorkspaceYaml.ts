@@ -13,48 +13,79 @@ import YAML from 'yaml';
 import {WORKSPACE_MANIFEST_FILENAME} from '@pnpm/constants';
 import {listFiles} from './files.ts';
 
+/**
+ * This class contains all information of a `pnpm-workspace.yaml`.
+ **/
 export class PnpmWorkspaceYaml {
 
+  /**
+   * The absolute path to this `pnpm-workspace.yaml`.
+   */
   path: string;
+  /**
+   * The absolute path to the directory containing this `pnpm-workspace.yaml`.
+   */
   dir: string;
-  doc: YAML.Document;
+  /**
+   * A parsed {@link YAML} containing the content of this `pnpm-workspace.yaml`.
+   */
+  doc: YAML.Document<YAML.YAMLMap>;
 
-  constructor(path: string, dir: string, doc: YAML.Document) {
+  constructor(path: string, dir: string, doc: YAML.Document<YAML.YAMLMap>) {
     this.path = path;
     this.dir = dir;
     this.doc = doc;
   }
 
+  /**
+   * Parses a {@link PnpmWorkspaceYaml} from a `pnpm-workspace.yaml` file in the given directory.
+   */
   static async parse(pnpmWorkspaceDir: string): Promise<PnpmWorkspaceYaml> {
-    const pnpmWorkspaceManifestPath = path.resolve(pnpmWorkspaceDir, WORKSPACE_MANIFEST_FILENAME);
-    const existingFile = await fs.readFile(pnpmWorkspaceManifestPath, 'utf8');
-    const doc = YAML.parseDocument(existingFile);
+    // read file and parse YAML
+    const pnpmWorkspaceYamlPath = path.resolve(pnpmWorkspaceDir, WORKSPACE_MANIFEST_FILENAME);
+    const content = await fs.readFile(pnpmWorkspaceYamlPath, 'utf8');
+    const doc = YAML.parseDocument<YAML.YAMLMap>(content);
+
+    // log errors and warnings
     if (doc.errors?.length) {
       let hasError = false;
       doc?.errors?.forEach(err => {
         if (err.name === 'YAMLParseError') {
           hasError = true;
-          console.error(`Error parsing yaml '${pnpmWorkspaceManifestPath}': ${err.message} (code ${err.code}) at ${err.pos}.`);
+          console.error(`Error parsing yaml '${pnpmWorkspaceYamlPath}': ${err.message} (code ${err.code}) at ${err.pos}.`);
         } else {
-          console.warn(`Warning parsing yaml '${pnpmWorkspaceManifestPath}': ${err.message} (code ${err.code}) at ${err.pos}.`);
+          console.warn(`Warning parsing yaml '${pnpmWorkspaceYamlPath}': ${err.message} (code ${err.code}) at ${err.pos}.`);
         }
       });
+
+      // exit process if there are errors
       if (hasError) {
         process.exitCode = 1;
         throw new Error('Yaml parse errors.');
       }
     }
-    return new PnpmWorkspaceYaml(pnpmWorkspaceManifestPath, pnpmWorkspaceDir, doc);
+
+    // create PnpmWorkspaceYaml instance using parsed YAML
+    return new PnpmWorkspaceYaml(pnpmWorkspaceYamlPath, pnpmWorkspaceDir, doc);
   }
 
+  /**
+   * Finds all directories containing a `pnpm-workspace.yaml` and returns their absolute paths.
+   */
   static async findPnpmWorkspaceDirs(root: string): Promise<string[]> {
+    // find all pnpm-workspace.yaml files
     const workspaceFiles = await listFiles(root, WORKSPACE_MANIFEST_FILENAME, {
       folderExcludes: ['src', 'node_modules', 'target', '.git'],
       maxDepth: 2
     });
+
+    // return directories containing the files
     return workspaceFiles.map(f => path.dirname(f));
   }
 
+  /**
+   * Returns the absolute path of all packages in this `pnpm-workspace.yaml`.
+   */
   getPackages(): string[] {
     const packages = this.doc.get('packages') as YAML.YAMLSeq<YAML.Scalar<string>>;
     return packages.items
@@ -62,52 +93,87 @@ export class PnpmWorkspaceYaml {
       .map(p => path.resolve(this.dir, p));
   }
 
+  /**
+   * Removes the link to the scout overrides from the overrides.
+   */
   removeScoutOverrides() {
     const existingOverrides = this.doc.get('overrides') as YAML.YAMLMap;
     if (!existingOverrides) {
-      // there are no overrides: nothing to remove and nothing to restore
+      // there are no overrides -> nothing to remove
       return;
     }
     existingOverrides.delete('<<');
   }
 
+  /**
+   * Updates scout overrides in this `pnpm-workspace.yaml` and links them into the overrides.
+   */
   updateScoutOverrides(newScoutOverrides: Record<string, string>) {
     // create new scout overrides block
     const scoutOverridesAnchorName = 'scout-overrides';
     const scoutOverrides = new YAML.YAMLMap();
     scoutOverrides.anchor = scoutOverridesAnchorName;
     Object.entries(newScoutOverrides).forEach(([name, override]) => scoutOverrides.set(name, override));
+
+    // replace scout block and include overrides
     const scout = new YAML.YAMLMap();
     scout.set('overrides', scoutOverrides);
     this.doc.set('scout', scout);
 
-    // assert scout-overrides block is linked in overrides (alias)
-    this._assertScoutOverridesAlias(scoutOverrides, scoutOverridesAnchorName);
+    // ensure scout-overrides block is linked in overrides using an alias
+    this._ensureScoutOverridesAlias(scout, scoutOverrides, scoutOverridesAnchorName);
   }
 
-  _assertScoutOverridesAlias(scoutOverrides: YAML.YAMLMap, scoutOverridesAnchorName: string) {
-    const key = '<<';
+  /**
+   * Ensures the scout overrides are included in the overrides.
+   */
+  protected _ensureScoutOverridesAlias(scout: YAML.YAMLMap, scoutOverrides: YAML.YAMLMap, scoutOverridesAnchorName: string) {
+    const mergeKey = '<<';
     const existingOverrides = this.doc.get('overrides') as YAML.YAMLMap;
     if (existingOverrides?.items?.length) {
+      // overrides are present -> ensure merge key
       const first = existingOverrides.items[0] as YAML.Pair<YAML.Scalar>;
-      if (first?.key?.value === key && first?.value instanceof YAML.Alias) {
+      if (first?.key?.value === mergeKey && first?.value instanceof YAML.Alias) {
+        // merge key is present and points to an alias
         const alias = first.value as YAML.Alias;
+        // check if the alias points to the scout overrides
         if (alias?.source === scoutOverridesAnchorName) {
-          return; // all fine
+          return;
         }
       }
 
-      // alias is missing: add at the beginning
-      existingOverrides.items = [new YAML.Pair(new YAML.Scalar(key), this.doc.createAlias(scoutOverrides, scoutOverridesAnchorName)), ...existingOverrides.items];
+      // merge key is missing, not at the beginning or does not point to the correct alias -> add at the beginning or move to the beginning
+      existingOverrides.items = [
+        new YAML.Pair(
+          new YAML.Scalar(mergeKey),
+          this.doc.createAlias(scoutOverrides, scoutOverridesAnchorName)
+        ),
+        ...existingOverrides.items
+      ];
+
+      // move overrides after scout if necessary
+      const items = this.doc.contents.items;
+      const overridesIndex = items.findIndex(pair => pair.value === existingOverrides);
+      const scoutIndex = items.findIndex(pair => pair.value === scout);
+      if (overridesIndex > -1 && overridesIndex < scoutIndex) {
+        // temporarily remove overrides
+        const overridesPair = items.splice(overridesIndex, 1)[0];
+        // after removing the overrides scout is at scoutIndex-1 -> inserting the overrides at scoutIndex places them directly after scout
+        items.splice(scoutIndex, 0, overridesPair);
+      }
     } else {
       // create new overrides block including the alias
+      // it is added at the end and therefore after the
       const newOverrides = {};
-      newOverrides[key] = this.doc.createAlias(scoutOverrides, scoutOverridesAnchorName);
+      newOverrides[mergeKey] = this.doc.createAlias(scoutOverrides, scoutOverridesAnchorName);
       this.doc.set('overrides', newOverrides);
     }
   }
 
-  async flush() {
+  /**
+   * Writes this `pnpm-workspace.yaml` to the disk.
+   */
+  async flush(): Promise<void> {
     // Do not use @pnpm/workspace.manifest-writer as it changes order and removes comments
     const content = YAML.stringify(this.doc);
     return await fs.writeFile(this.path, content, 'utf8');

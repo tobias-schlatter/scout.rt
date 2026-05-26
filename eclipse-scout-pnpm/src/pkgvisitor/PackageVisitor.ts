@@ -77,7 +77,7 @@ async function visitDependenciesForPackage(packagePath: string, currentLockfile:
   visitor: PackageVisitor, opts: PackageVisitOptions): Promise<void> {
   const importerId = getLockfileImporterId(opts.lockfileDir, path.resolve(opts.lockfileDir, packagePath));
   const parentId: TreeNodeId = {type: 'importer', importerId};
-  const rootInfo = await PackageVisitInfo.fromPackageJson(opts.lockfileDir, packagePath);
+  const rootInfo = await PackageVisitInfo.fromPackageJson(path.join(opts.lockfileDir, packagePath));
   for (const dependenciesField of DEPENDENCIES_FIELDS.sort().filter(dependenciesField => opts.include[dependenciesField])) {
     const importer = currentLockfile.importers[importerId];
     if (!importer) {

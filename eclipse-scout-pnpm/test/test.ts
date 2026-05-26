@@ -12,10 +12,10 @@ import {test, type TestContext} from 'node:test';
 import assert from 'node:assert';
 import path from 'node:path';
 
-import {pnpmInstall} from '../src/pnpmInstall.ts';
+import {scoutInstall} from '../src/index.ts';
 
 test('install required', async (t: TestContext) => {
   const pnpmWorkspaceRoot = path.resolve(process.cwd(), '../..');
-  await pnpmInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'single-external'});
+  await scoutInstall(pnpmWorkspaceRoot, {updateMode: 'required', logConverge: 'single-external'});
   assert.strictEqual(1, 1);
 });

@@ -11,32 +11,60 @@
 import path from 'node:path';
 import {readPackageJsonFromDir} from '@pnpm/read-package-json';
 
+/**
+ * This class contains information about a package.
+ * This information may depend on the context.
+ * E.g. if the package is used as a dependency which is declared using a npm alias, both alias and name are set.
+ **/
+// TODO fsh name
 export class PackageVisitInfo {
+  /**
+   * Name of the package.
+   */
   name: string;
+  /**
+   * Alias the package is used by.
+   */
   alias: string;
+  /**
+   * Version of the package.
+   */
   version: string;
   /**
-   * absolute path to package
+   * Absolute path to package.
    */
   path: string;
 
   constructor(lockfileDir: string, model: { name: string; alias: string; version: string; path: string }) {
     this.path = path.isAbsolute(model.path) ? model.path : path.resolve(lockfileDir, model.path);
-    if (!model?.name || !model?.version) {
-      throw new Error(`'name' or 'version' attribute missing in '${this.path}'.`);
+    if (!model?.name || !model?.alias || !model?.version) {
+      throw new Error(`'name', 'alias' or 'version' attribute missing in '${this.path}'.`);
     }
     this.name = model.name;
     this.alias = model.alias;
     this.version = model.version;
   }
 
-  id(): string {
+  /**
+   * {@link name} and {@link version} combined (e.g. `foo@1.2.3`)
+   */
+  get id(): string {
     return `${this.name}@${this.version}`;
   }
 
-  static async fromPackageJson(lockfileDir: string, packagePath: string): Promise<PackageVisitInfo> {
-    const dir = path.join(lockfileDir, packagePath);
-    const content = await readPackageJsonFromDir(dir);
-    return new PackageVisitInfo(lockfileDir, {name: content.name, alias: content.name, version: content.version, path: dir});
+  /**
+   * Parses a {@link PackageVisitInfo} from a `package.json` file in the given directory.
+   */
+  static async fromPackageJson(directory: string): Promise<PackageVisitInfo> {
+    const content = await readPackageJsonFromDir(directory);
+    return new PackageVisitInfo(
+      null,
+      {
+        name: content.name,
+        alias: content.name,
+        version: content.version,
+        path: directory
+      }
+    );
   }
 }

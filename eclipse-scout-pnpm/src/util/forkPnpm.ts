@@ -13,18 +13,23 @@ import path from 'node:path';
 import process from 'node:process';
 import {fileExists} from './files.ts';
 
-export async function forkPnpm(workingDir: string, ...args: string[]): Promise<number> {
-  const pnpm = await pnpmCjs();
+/**
+ * Forks a pnpm process in the given directory with the given arguments.
+ */
+export async function forkPnpm(workingDir: string, ...args: string[]): Promise<void> {
+  const pnpm = await findPnpmCjs();
   return new Promise((resolve, reject) => {
-    const child = fork(pnpm, args, {
+    // fork a child process in the working directory
+    const childProcess = fork(pnpm, args, {
       cwd: workingDir,
       stdio: 'inherit'
     });
 
-    child.on('error', reject);
-    child.on('exit', (code: number, signal: NodeJS.Signals) => {
+    // resolve or reject promise depending on the result of the child process
+    childProcess.on('error', reject);
+    childProcess.on('exit', (code: number, signal: NodeJS.Signals) => {
       if (code === 0) {
-        resolve(code);
+        resolve();
       } else {
         reject(new Error(`Child exited with code ${code}${signal ? `, signal ${signal}` : ''}`));
       }
@@ -32,16 +37,23 @@ export async function forkPnpm(workingDir: string, ...args: string[]): Promise<n
   });
 }
 
-export async function pnpmCjs(): Promise<string> {
-  const pathCandidates = [
+/**
+ * Searches for the `pnpm.cjs` and returns its path. Throws an error if no `pnpm.cjs` was found.
+ */
+export async function findPnpmCjs(): Promise<string> {
+  const candidates = [
     '../../lib/node_modules/pnpm/bin/pnpm.cjs', // e.g. Linux
     '../node_modules/pnpm/bin/pnpm.cjs' // e.g. Windows
   ];
-  for (const candidate of pathCandidates) {
-    const abs = path.resolve(process.execPath, candidate);
-    if (await fileExists(abs)) {
-      return abs;
+
+  // find first candidate that exists
+  for (const candidate of candidates) {
+    const absolutePath = path.resolve(process.execPath, candidate);
+    if (await fileExists(absolutePath)) {
+      return absolutePath;
     }
   }
+
+  // pnpm.cjs not found -> throw error
   throw new Error(`Cannot find 'pnpm.cjs' in node installation '${process.execPath}'.`);
 }
