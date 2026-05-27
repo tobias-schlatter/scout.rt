@@ -36,7 +36,7 @@ public class SecurityUtilityTest {
 
   private static final int KEY_LEN = 128;
   private static final Charset ENCODING = StandardCharsets.UTF_8;
-  private static final char[] PASSWORD = "insecure".toCharArray();
+  private static final char[] PASSWORD = "insecure" .toCharArray();
 
   @Test
   public void testEncryption() throws IOException {
@@ -63,24 +63,24 @@ public class SecurityUtilityTest {
   @Test(expected = AssertionException.class)
   public void testEncryptNoData() {
     final byte[] salt = SecurityUtility.createRandomBytes();
-    SecurityUtility.encrypt(null, "pass".toCharArray(), salt, KEY_LEN);
+    SecurityUtility.encrypt(null, "pass" .toCharArray(), salt, KEY_LEN);
   }
 
   @Test(expected = AssertionException.class)
   public void testEncryptNoSalt() {
-    SecurityUtility.encrypt("test".getBytes(ENCODING), "pass".toCharArray(), null, KEY_LEN);
+    SecurityUtility.encrypt("test" .getBytes(ENCODING), "pass" .toCharArray(), null, KEY_LEN);
   }
 
   @Test(expected = AssertionException.class)
   public void testEncryptNoKey() {
     final byte[] salt = SecurityUtility.createRandomBytes();
-    SecurityUtility.encrypt("test".getBytes(ENCODING), null, salt, KEY_LEN);
+    SecurityUtility.encrypt("test" .getBytes(ENCODING), null, salt, KEY_LEN);
   }
 
   @Test(expected = AssertionException.class)
   public void testEncryptWrongKeyLen() {
     final byte[] salt = SecurityUtility.createRandomBytes();
-    SecurityUtility.encrypt("test".getBytes(ENCODING), "pass".toCharArray(), salt, 4);
+    SecurityUtility.encrypt("test" .getBytes(ENCODING), "pass" .toCharArray(), salt, 4);
   }
 
   @Test(expected = AssertionException.class)
@@ -138,7 +138,7 @@ public class SecurityUtilityTest {
 
   @Test
   public void testCreatePasswordHash() {
-    char[] password = "AwesomePassword".toCharArray();
+    char[] password = "AwesomePassword" .toCharArray();
     byte[] salt = SecurityUtility.createRandomBytes();
     PasswordHash passwordHash = SecurityUtility.createPasswordHash(password, salt);
 
@@ -149,7 +149,7 @@ public class SecurityUtilityTest {
 
   @Test
   public void testHash() {
-    final byte[] data = "testdata".getBytes(ENCODING);
+    final byte[] data = "testdata" .getBytes(ENCODING);
     byte[] hash = SecurityUtility.hash(data);
     byte[] hash2 = SecurityUtility.hash(data);
     byte[] hash3 = SecurityUtility.hash(new byte[]{});
@@ -169,13 +169,13 @@ public class SecurityUtilityTest {
 
   @Test
   public void testHashStability() {
-    final byte[] data = "my text to hash".getBytes(ENCODING);
+    final byte[] data = "my text to hash" .getBytes(ENCODING);
     Assert.assertEquals("JqpRPiojKrf7Pb4rkfTrLjyz5noCYCWLJVVQo3TwV+t83ZG6dR6QNyB5yXbBL1fhkO0Xh0qr05Xor33blAuHrw==", Base64Utility.encode(SecurityUtility.hash(data)));
   }
 
   @Test
   public void testToHashingStream_InputStream() throws IOException {
-    final byte[] data = "test.input.stream".getBytes(ENCODING);
+    final byte[] data = "test.input.stream" .getBytes(ENCODING);
     DigestInputStream hashingStream = SecurityUtility.toHashingStream(new ByteArrayInputStream(data));
     byte[] hash = hashingStream.getMessageDigest().digest();
     // ensure data has been read
@@ -186,7 +186,7 @@ public class SecurityUtilityTest {
 
   @Test
   public void testToHashingStream_OutputStream() throws IOException {
-    final byte[] data = "test.output.stream".getBytes(ENCODING);
+    final byte[] data = "test.output.stream" .getBytes(ENCODING);
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     DigestOutputStream hashingStream = SecurityUtility.toHashingStream(outputStream);
     byte[] hash = hashingStream.getMessageDigest().digest();
@@ -199,7 +199,7 @@ public class SecurityUtilityTest {
 
   @Test
   public void testHashLegacyPassword() {
-    char[] password = "test.1234".toCharArray();
+    char[] password = "test.1234" .toCharArray();
     byte[] salt = Base64Utility.decode("NSZei2H8Y5YYMzGXe+tiSbJ6TeKEN1sNR7ovARa4OZE=");
     byte[] expectedHash = Base64Utility.decode("qNGznjbmYm8p3Aihh3DLX5sZcHOYXJ2icH2t7zXHObNDqr4J2dzBv7J1//PkWqXLMpCs7kEGIBxq6ukslJOA2g==");
 
@@ -219,7 +219,7 @@ public class SecurityUtilityTest {
     byte[] hash1 = SecurityUtility.hashPassword(PASSWORD, salt);
     byte[] hash2 = SecurityUtility.hashPassword(PASSWORD, salt2);
     byte[] hash3 = SecurityUtility.hashPassword(PASSWORD, salt);
-    byte[] hash4 = SecurityUtility.hashPassword("other".toCharArray(), salt);
+    byte[] hash4 = SecurityUtility.hashPassword("other" .toCharArray(), salt);
 
     // ensure hashing was executed
     Assert.assertFalse(Arrays.equals(String.valueOf(PASSWORD).getBytes(ENCODING), hash1));
@@ -253,7 +253,7 @@ public class SecurityUtilityTest {
     Assert.assertTrue(ok);
     ok = false;
     try {
-      SecurityUtility.hashPassword("".toCharArray(), salt);
+      SecurityUtility.hashPassword("" .toCharArray(), salt);
     }
     catch (AssertionException e) {
       ok = true;
@@ -271,11 +271,11 @@ public class SecurityUtilityTest {
 
   @Test
   public void testCreateMac() {
-    byte[] data = "testdata".getBytes();
-    byte[] data2 = "testdata2".getBytes();
-    byte[] mac1 = SecurityUtility.createMac("testpw".getBytes(), data);
-    byte[] mac2 = SecurityUtility.createMac("testpwdiff".getBytes(), data);
-    byte[] mac3 = SecurityUtility.createMac("testpwd".getBytes(), data2);
+    byte[] data = "testdata" .getBytes();
+    byte[] data2 = "testdata2" .getBytes();
+    byte[] mac1 = SecurityUtility.createMac("testpw" .getBytes(), data);
+    byte[] mac2 = SecurityUtility.createMac("testpwdiff" .getBytes(), data);
+    byte[] mac3 = SecurityUtility.createMac("testpwd" .getBytes(), data2);
 
     Assert.assertFalse(Arrays.equals(mac1, mac2));
     Assert.assertFalse(Arrays.equals(mac3, mac2));
@@ -315,7 +315,7 @@ public class SecurityUtilityTest {
   @Test
   public void testSignature() {
     KeyPairBytes keyPair = SecurityUtility.generateKeyPair();
-    final byte[] data = "original test data".getBytes(ENCODING);
+    final byte[] data = "original test data" .getBytes(ENCODING);
 
     byte[] signature = SecurityUtility.createSignature(keyPair.getPrivateKey(), data);
     Assert.assertTrue(signature.length > 0);
@@ -325,7 +325,7 @@ public class SecurityUtilityTest {
 
   @Test
   public void testSignatureApiStability() {
-    final byte[] data = "myTestData".getBytes(ENCODING);
+    final byte[] data = "myTestData" .getBytes(ENCODING);
     final byte[] sig = Base64Utility.decode("MEUCIDZoyslIxALDkonxJKwMnk6v7uyu8T50cch+cU1EPnL/AiEAuGLvbW+CvUKTKYY7t5j75TTkjUfLevOXg7C53GoT/Sg=");
     final byte[] pubKey = Base64Utility.decode("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7KTCxVbBVVqNWELFCR33K8LUrfmp6psbH1AXwD/ezzhad7mMcTEd23ZUmxT4RZ75DYmGFRGImpqhpdwWNrbCPg==");
     Assert.assertTrue(SecurityUtility.verifySignature(pubKey, data, sig));
@@ -344,10 +344,20 @@ public class SecurityUtilityTest {
   @Test
   public void testDecryptionApiStability_2024() {
     final byte[] encrypted = Base64Utility.decode("WzIwMjQ6djFdU1rrQiSnCSBlPEk7SZayaYngVKYszy7EbjV1RGUq0CsaJyOHtXZwCp+ogg==");
-    final byte[] salt = "salty".getBytes(ENCODING);
+    final byte[] salt = "salty" .getBytes(ENCODING);
     Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, PASSWORD, salt, 128), ENCODING));
     EncryptionKey key = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(encrypted), 6), PASSWORD, salt, 128, null);
     Assert.assertEquals("[2024:v1]", new String(key.getCompatibilityHeader(), StandardCharsets.US_ASCII));
+    Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, key), ENCODING));
+  }
+
+  @Test
+  public void testDecryptionApiStability_2026() {
+    final byte[] encrypted = Base64Utility.decode("WzIwMjY6djE6UzhuZ0swanp2dGNFMStyNkJhSnBpRjV0MVdMS3A3Y2tHdFI2SVFVL0VmTT1dU1rrQiSnCSBlPEk7SZayaYngVKYszy7EbjV1RGUq0CsaJyOHtXZwCp+ogg==");
+    final byte[] salt = "salty" .getBytes(ENCODING);
+    Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, PASSWORD, salt, 128), ENCODING));
+    EncryptionKey key = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(encrypted), 6), PASSWORD, salt, 128, null);
+    Assert.assertEquals("[2026:v1:S8ngK0jzvtcE1+r6BaJpiF5t1WLKp7ckGtR6IQU/EfM=]", new String(key.getCompatibilityHeader(), StandardCharsets.US_ASCII));
     Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, key), ENCODING));
   }
 
@@ -372,22 +382,34 @@ public class SecurityUtilityTest {
     in = new PushbackInputStream(new ByteArrayInputStream(new byte[]{'[', '1', '2', '3', '0', ':', 0, ']', 78, 79}), 6);
     Assert.assertArrayEquals(new byte[]{'[', '1', '2', '3', '0', ':', 0, ']'}, SecurityUtility.extractCompatibilityHeader(in));
     Assert.assertArrayEquals(new byte[]{78, 79}, IOUtility.readBytes(in));
+
+    in = new PushbackInputStream(new ByteArrayInputStream(new byte[]{'[', '1', '2', '3', '0', ':', 0, 'A', '0', '2', 'B', ']', 78, 79}), 6);
+    Assert.assertArrayEquals(new byte[]{'[', '1', '2', '3', '0', ':', 0, 'A', '0', '2', 'B', ']'}, SecurityUtility.extractCompatibilityHeader(in));
+    Assert.assertArrayEquals(new byte[]{78, 79}, IOUtility.readBytes(in));
   }
 
   @Test
   public void testCompatibilityHeaderKeyGeneration() {
-    byte[] salt = "salty".getBytes(StandardCharsets.US_ASCII);
+    byte[] salt = "salty" .getBytes(StandardCharsets.US_ASCII);
 
     EncryptionKey currentKey = SecurityUtility.createEncryptionKey(PASSWORD, salt, 128);
 
     // encryption key w/o compatibility header must match current version decryption key
-    EncryptionKey decryptionKey = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
+    String passwordHash = Base64Utility.encode(SecurityUtility.hashPassword(PASSWORD, salt));
+    String compatibilityHeader2026 = '[' + ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + passwordHash + ']';
+    EncryptionKey decryptionKey = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(compatibilityHeader2026.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
     Assert.assertEquals(decryptionKey.get(), currentKey.get());
-    Assert.assertArrayEquals(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.getBytes(StandardCharsets.US_ASCII), decryptionKey.getCompatibilityHeader());
+    Assert.assertArrayEquals(compatibilityHeader2026.getBytes(StandardCharsets.US_ASCII), decryptionKey.getCompatibilityHeader());
+
+    // 2024 and 2026 have the same key, but the compatibility header is different
+    EncryptionKey decryptionKey2024 = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
+    Assert.assertEquals(decryptionKey2024.get(), currentKey.get());
+    Assert.assertArrayEquals(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.getBytes(StandardCharsets.US_ASCII), decryptionKey2024.getCompatibilityHeader());
 
     // old decryption key differs from current version
     EncryptionKey oldDecryptionKey = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2023_V1.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
     Assert.assertNotEquals(oldDecryptionKey.get(), currentKey.get());
+    Assert.assertNotEquals(decryptionKey2024.get(), oldDecryptionKey.get());
     Assert.assertArrayEquals(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2023_V1.getBytes(StandardCharsets.US_ASCII), oldDecryptionKey.getCompatibilityHeader());
 
     EncryptionKey evenOlderDecryptionKey = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2021_V1.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
@@ -404,10 +426,10 @@ public class SecurityUtilityTest {
 
   @Test
   public void testDifferentKeyLengths() {
-    Assert.assertThrows(AssertionException.class, () -> SecurityUtility.createEncryptionKey(PASSWORD, "salty".getBytes(StandardCharsets.US_ASCII), 42));
+    Assert.assertThrows(AssertionException.class, () -> SecurityUtility.createEncryptionKey(PASSWORD, "salty" .getBytes(StandardCharsets.US_ASCII), 42));
 
-    SecurityUtility.createEncryptionKey(PASSWORD, "salty".getBytes(StandardCharsets.US_ASCII), 192);
-    SecurityUtility.createEncryptionKey(PASSWORD, "salty".getBytes(StandardCharsets.US_ASCII), 256);
+    SecurityUtility.createEncryptionKey(PASSWORD, "salty" .getBytes(StandardCharsets.US_ASCII), 192);
+    SecurityUtility.createEncryptionKey(PASSWORD, "salty" .getBytes(StandardCharsets.US_ASCII), 256);
   }
 
   @Test

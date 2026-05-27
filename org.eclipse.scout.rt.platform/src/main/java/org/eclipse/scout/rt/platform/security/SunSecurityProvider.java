@@ -108,7 +108,8 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
         getCipherAlgorithmProvider(),
         GCM_INITIALIZATION_VECTOR_LEN,
         GCM_AUTH_TAG_BIT_LEN,
-        getKeyDerivationIterationCount());
+        getKeyDerivationIterationCount(),
+        true);
   }
 
   @Override
@@ -125,7 +126,8 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
           "SunJCE",
           16,
           128,
-          3557);
+          3557,
+          false);
     }
     if (ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.equals(v)) {
       return createEncryptionKeyInternal(
@@ -137,7 +139,21 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
           "SunJCE",
           16,
           128,
-          10000);
+          10000,
+          false);
+    }
+    if (ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PATTERN.matcher(v).matches()) {
+      return createEncryptionKeyInternal(
+          password,
+          salt,
+          keyLen,
+          "PBKDF2WithHmacSHA256",
+          "AES",
+          "SunJCE",
+          16,
+          128,
+          10000,
+          true);
     }
     throw new ProcessingException("Unknown compatibility header {}", v);
   }
@@ -151,7 +167,8 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
       String cipherAlgorithmProvider,
       int gcmInitVecLen,
       int gcmAuthTagBitLen,
-      int keyDerivationIterationCount) {
+      int keyDerivationIterationCount,
+      boolean passwordHashInCompatibilityHeader) {
     assertGreater(assertNotNull(password, "password must not be null.").length, 0, "empty password is not allowed.");
     assertGreater(assertNotNull(salt, "salt must be provided.").length, 0, "empty salt is not allowed.");
     assertTrue(keyLen == 128 || keyLen == 192 || keyLen == 256, "key length must be 128, 192 or 256.");
@@ -169,7 +186,11 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
 
       SecretKey secretKey = new SecretKeySpec(key, cipherAlgorithm);
       GCMParameterSpec parameters = new GCMParameterSpec(gcmAuthTagBitLen, iv);
-      byte[] compatibilityHeader = generateCompatibilityHeader(keyLen, secretKeyAlgorithm, cipherAlgorithm, cipherAlgorithmProvider, gcmInitVecLen, gcmAuthTagBitLen, keyDerivationIterationCount);
+      String passwordHash = null;
+      if (passwordHashInCompatibilityHeader) {
+        passwordHash = Base64Utility.encode(SecurityUtility.hashPassword(password, salt));
+      }
+      byte[] compatibilityHeader = generateCompatibilityHeader(keyLen, secretKeyAlgorithm, cipherAlgorithm, cipherAlgorithmProvider, gcmInitVecLen, gcmAuthTagBitLen, keyDerivationIterationCount, passwordHash);
       return new EncryptionKey(secretKey, parameters, compatibilityHeader);
     }
     catch (NoSuchAlgorithmException e) {
@@ -180,7 +201,7 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
     }
   }
 
-  protected static byte[] generateCompatibilityHeader(int keyLen, String secretKeyAlgorithm, String cipherAlgorithm, String cipherAlgorithmProvider, int gcmInitVecLen, int gcmAuthTagBitLen, int keyDerivationIterationCount) {
+  protected static byte[] generateCompatibilityHeader(int keyLen, String secretKeyAlgorithm, String cipherAlgorithm, String cipherAlgorithmProvider, int gcmInitVecLen, int gcmAuthTagBitLen, int keyDerivationIterationCount, String passwordHash) {
     String headerStr = "[1:"
         + keyLen
         + "-" + secretKeyAlgorithm
@@ -189,8 +210,12 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
         + "-" + gcmInitVecLen
         + "-" + gcmAuthTagBitLen
         + "-" + keyDerivationIterationCount
+        + "-" + passwordHash
         + "]";
-    if ("PBKDF2WithHmacSHA256".equals(secretKeyAlgorithm) && "AES".equals(cipherAlgorithm) && "SunJCE".equals(cipherAlgorithmProvider) && 16 == gcmInitVecLen && 128 == gcmAuthTagBitLen) {
+    if ("PBKDF2WithHmacSHA256" .equals(secretKeyAlgorithm) && "AES" .equals(cipherAlgorithm) && "SunJCE" .equals(cipherAlgorithmProvider) && 16 == gcmInitVecLen && 128 == gcmAuthTagBitLen) {
+      if (passwordHash != null) {
+        return ("[" + ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + passwordHash + "]").getBytes(StandardCharsets.US_ASCII);
+      }
       switch (keyDerivationIterationCount) {
         case 10000 -> {
           return ENCRYPTION_COMPATIBILITY_HEADER_2024_V1.getBytes(StandardCharsets.US_ASCII);
@@ -286,7 +311,6 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
     assertNotNull(input, "input must not be null.");
     assertNotNull(output, "output must not be null.");
 
-
     try (OutputStream out = doCrypt(output, key, mode, CipherOutputStream::new)) {
       int n;
       byte[] buf = new byte[BUF_SIZE];
@@ -310,10 +334,10 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
 
       return cipherStreamConstructor.apply(stream, cipher);
     }
-    catch(NoSuchAlgorithmException e) {
+    catch (NoSuchAlgorithmException e) {
       throw new ProcessingException("Unable to crypt data. Algorithm could not be found. Make sure to use JRE 1.8 or newer.", e);
     }
-    catch(NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException | NoSuchProviderException e) {
+    catch (NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException | NoSuchProviderException e) {
       throw new ProcessingException("Unable to crypt data.", e);
     }
   }
