@@ -44,6 +44,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -168,7 +169,7 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
       int gcmInitVecLen,
       int gcmAuthTagBitLen,
       int keyDerivationIterationCount,
-      boolean passwordHashInCompatibilityHeader) {
+      boolean fingerprintInCompatibilityHeader) {
     assertGreater(assertNotNull(password, "password must not be null.").length, 0, "empty password is not allowed.");
     assertGreater(assertNotNull(salt, "salt must be provided.").length, 0, "empty salt is not allowed.");
     assertTrue(keyLen == 128 || keyLen == 192 || keyLen == 256, "key length must be 128, 192 or 256.");
@@ -184,13 +185,14 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
       System.arraycopy(encoded, 0, key, 0, key.length);
       System.arraycopy(encoded, key.length, iv, 0, gcmInitVecLen);
 
+      String fingerprint = null;
+      if (fingerprintInCompatibilityHeader) {
+        fingerprint = createFingerprint(key);
+      }
+
       SecretKey secretKey = new SecretKeySpec(key, cipherAlgorithm);
       GCMParameterSpec parameters = new GCMParameterSpec(gcmAuthTagBitLen, iv);
-      String passwordHash = null;
-      if (passwordHashInCompatibilityHeader) {
-        passwordHash = Base64Utility.encode(SecurityUtility.hashPassword(password, salt));
-      }
-      byte[] compatibilityHeader = generateCompatibilityHeader(keyLen, secretKeyAlgorithm, cipherAlgorithm, cipherAlgorithmProvider, gcmInitVecLen, gcmAuthTagBitLen, keyDerivationIterationCount, passwordHash);
+      byte[] compatibilityHeader = generateCompatibilityHeader(keyLen, secretKeyAlgorithm, cipherAlgorithm, cipherAlgorithmProvider, gcmInitVecLen, gcmAuthTagBitLen, keyDerivationIterationCount, fingerprint);
       return new EncryptionKey(secretKey, parameters, compatibilityHeader);
     }
     catch (NoSuchAlgorithmException e) {
@@ -201,7 +203,19 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
     }
   }
 
-  protected static byte[] generateCompatibilityHeader(int keyLen, String secretKeyAlgorithm, String cipherAlgorithm, String cipherAlgorithmProvider, int gcmInitVecLen, int gcmAuthTagBitLen, int keyDerivationIterationCount, String passwordHash) {
+  protected static String createFingerprint(byte[] key) throws NoSuchAlgorithmException {
+    // SHA‑256 -> truncate to 8 bytes (64 bit) -> hex
+    MessageDigest md = MessageDigest.getInstance("SHA-256");
+    byte[] full = md.digest(key);
+    byte[] fp = Arrays.copyOf(full, 8); // 64‑bit identifier
+    StringBuilder sb = new StringBuilder(fp.length * 2);
+    for (byte b : fp) {
+      sb.append(String.format("%02x", b));
+    }
+    return sb.toString();
+  }
+
+  protected static byte[] generateCompatibilityHeader(int keyLen, String secretKeyAlgorithm, String cipherAlgorithm, String cipherAlgorithmProvider, int gcmInitVecLen, int gcmAuthTagBitLen, int keyDerivationIterationCount, String fingerprint) {
     String headerStr = "[1:"
         + keyLen
         + "-" + secretKeyAlgorithm
@@ -210,11 +224,11 @@ public class SunSecurityProvider implements ISecurityProvider, ILegacySecurityPr
         + "-" + gcmInitVecLen
         + "-" + gcmAuthTagBitLen
         + "-" + keyDerivationIterationCount
-        + "-" + passwordHash
+        + "-" + fingerprint
         + "]";
     if ("PBKDF2WithHmacSHA256" .equals(secretKeyAlgorithm) && "AES" .equals(cipherAlgorithm) && "SunJCE" .equals(cipherAlgorithmProvider) && 16 == gcmInitVecLen && 128 == gcmAuthTagBitLen) {
-      if (passwordHash != null) {
-        return ("[" + ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + passwordHash + "]").getBytes(StandardCharsets.US_ASCII);
+      if (fingerprint != null) {
+        return ("[" + ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + fingerprint + "]").getBytes(StandardCharsets.US_ASCII);
       }
       switch (keyDerivationIterationCount) {
         case 10000 -> {

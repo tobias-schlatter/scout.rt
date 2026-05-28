@@ -353,11 +353,11 @@ public class SecurityUtilityTest {
 
   @Test
   public void testDecryptionApiStability_2026() {
-    final byte[] encrypted = Base64Utility.decode("WzIwMjY6djE6UzhuZ0swanp2dGNFMStyNkJhSnBpRjV0MVdMS3A3Y2tHdFI2SVFVL0VmTT1dU1rrQiSnCSBlPEk7SZayaYngVKYszy7EbjV1RGUq0CsaJyOHtXZwCp+ogg==");
+    final byte[] encrypted = Base64Utility.decode("WzIwMjY6djE6ZjIxZDEyYTNjOGNiYzA0Nl1TWutCJKcJIGU8STtJlrJpieBUpizPLsRuNXVEZSrQKxonI4e1dnAKn6iC");
     final byte[] salt = "salty" .getBytes(ENCODING);
     Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, PASSWORD, salt, 128), ENCODING));
     EncryptionKey key = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(encrypted), 6), PASSWORD, salt, 128, null);
-    Assert.assertEquals("[2026:v1:S8ngK0jzvtcE1+r6BaJpiF5t1WLKp7ckGtR6IQU/EfM=]", new String(key.getCompatibilityHeader(), StandardCharsets.US_ASCII));
+    Assert.assertEquals("[2026:v1:f21d12a3c8cbc046]", new String(key.getCompatibilityHeader(), StandardCharsets.US_ASCII));
     Assert.assertEquals("This is an encrypted string", new String(SecurityUtility.decrypt(encrypted, key), ENCODING));
   }
 
@@ -395,8 +395,8 @@ public class SecurityUtilityTest {
     EncryptionKey currentKey = SecurityUtility.createEncryptionKey(PASSWORD, salt, 128);
 
     // encryption key w/o compatibility header must match current version decryption key
-    String passwordHash = Base64Utility.encode(SecurityUtility.hashPassword(PASSWORD, salt));
-    String compatibilityHeader2026 = '[' + ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + passwordHash + ']';
+    final String fingerprint = "f21d12a3c8cbc046";
+    String compatibilityHeader2026 = '[' + ISecurityProvider.ENCRYPTION_COMPATIBILITY_HEADER_2026_V1_PREFIX + fingerprint + ']';
     EncryptionKey decryptionKey = SecurityUtility.createDecryptionKey(new PushbackInputStream(new ByteArrayInputStream(compatibilityHeader2026.getBytes(StandardCharsets.US_ASCII)), 9), PASSWORD, salt, 128, null);
     Assert.assertEquals(decryptionKey.get(), currentKey.get());
     Assert.assertArrayEquals(compatibilityHeader2026.getBytes(StandardCharsets.US_ASCII), decryptionKey.getCompatibilityHeader());
