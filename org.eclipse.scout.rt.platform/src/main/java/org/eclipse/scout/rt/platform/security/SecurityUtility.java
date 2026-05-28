@@ -326,27 +326,6 @@ public final class SecurityUtility {
   }
 
   /**
-   * Check if the {@code inputData} is encrypted by checking if it contains a compatibility header.
-   *
-   * @param inputData
-   *     which can unread 6 characters
-   * @return {@code true} if the {@code inputData} is encrypted, {@code false} otherwise.
-   * @throws ProcessingException
-   *     if there is an error reading the stream.
-   */
-  public static boolean isEncrypted(PushbackInputStream inputData) { // FIXME rsb remove if not used
-    try {
-      byte[] first6 = inputData.readNBytes(6);
-      //push back
-      inputData.unread(first6);
-      return isCompatibilityHeaderPrefix(first6);
-    }
-    catch (IOException e) {
-      throw new ProcessingException("Unable to read stream.", e);
-    }
-  }
-
-  /**
    * See {@link ISecurityProvider#createSecureRandomBytes(int)}
    */
   public static byte[] createRandomBytes(int numBytes) {

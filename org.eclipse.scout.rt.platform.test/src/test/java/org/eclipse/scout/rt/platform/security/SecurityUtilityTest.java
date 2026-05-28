@@ -431,27 +431,4 @@ public class SecurityUtilityTest {
     SecurityUtility.createEncryptionKey(PASSWORD, "salty" .getBytes(StandardCharsets.US_ASCII), 192);
     SecurityUtility.createEncryptionKey(PASSWORD, "salty" .getBytes(StandardCharsets.US_ASCII), 256);
   }
-
-  @Test
-  public void testIsEncrypted() {
-    final String origData = "origData";
-    final byte[] salt = SecurityUtility.createRandomBytes();
-    final byte[] inputBytes = origData.getBytes(ENCODING);
-
-    PushbackInputStream inputStream = new PushbackInputStream(new ByteArrayInputStream(inputBytes), 6);
-    Assert.assertFalse(SecurityUtility.isEncrypted(inputStream));
-    Assert.assertFalse(SecurityUtility.isEncrypted(inputStream)); // can be called multiple times
-
-    byte[] encryptData = SecurityUtility.encrypt(inputBytes, PASSWORD, salt, KEY_LEN);
-
-    PushbackInputStream encryptedStream = new PushbackInputStream(new ByteArrayInputStream(encryptData), 6);
-    Assert.assertTrue(SecurityUtility.isEncrypted(encryptedStream));
-    Assert.assertTrue(SecurityUtility.isEncrypted(encryptedStream)); // can be called multiple times
-
-    byte[] decryptedData = SecurityUtility.decrypt(encryptData, PASSWORD, salt, KEY_LEN);
-
-    PushbackInputStream decryptedStream = new PushbackInputStream(new ByteArrayInputStream(decryptedData), 6);
-    Assert.assertFalse(SecurityUtility.isEncrypted(decryptedStream));
-    Assert.assertFalse(SecurityUtility.isEncrypted(decryptedStream)); // can be called multiple times
-  }
 }
